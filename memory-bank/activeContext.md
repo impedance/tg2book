@@ -1,8 +1,8 @@
 # Active Context
 
 ## Current Work Focus
-- Modified the bot to handle forwarded messages instead of links.
-- Implemented changes in `bot.py` to parse forwarded messages and create EPUB files.
+- Modified the bot to handle any messages and create EPUB files.
+- Implemented changes in `bot.py` to parse messages and create EPUB files.
 
 ## Recent Changes
 - Updated `handle_message` function to check for forwarded messages.

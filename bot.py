@@ -2,35 +2,41 @@ import re
 import os
 import logging
 from telegram import Bot
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler
+from telegram import ext
 from ebooklib import epub
 from bs4 import BeautifulSoup
 import requests
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(filename='bot.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Simple regex to detect URLs
 URL_REGEX = re.compile(r'https?://\S+')
 TELEGRAM_API_TOKEN = "7857271142:AAHBTN1yvpoKIIrrmdXyV691xxs-qZhR9g0"
 
 def send_welcome(update, context):
-    logging.info("Sending welcome message")
     context.bot.send_message(chat_id=update.effective_chat.id, text="Welcome! I'm your Telegram bot.")
 
-def handle_link(update, context):
-    url = URL_REGEX.search(update.message.text).group()
-    try:
-        logging.info(f"Handling link: {url}")
-        post_content, images = download_telegram_post(url)
-        epub_book = create_epub(post_content, images)
-        epub.write_epub("post.epub", epub_book)
-        with open("post.epub", "rb") as file:
-            context.bot.send_document(chat_id=update.effective_chat.id, document=file)
-        logging.info("EPUB file sent successfully")
-    except Exception as e:
-        logging.error(f"An error occurred: {str(e)}")
-        context.bot.send_message(chat_id=update.effective_chat.id, text=f"An error occurred: {str(e)}")
+async def handle_link(update, context):
+    logging.info("handle_link function called")
+    url = URL_REGEX.search(update.message.text)
+    if url:
+        url = url.group()
+        try:
+            logging.info(f"Handling link: {url}")
+            post_content, images = download_telegram_post(url)
+            epub_book = create_epub(post_content, images)
+            epub.write_epub("post.epub", epub_book)
+            with open("post.epub", "rb") as file:
+                await context.bot.send_document(chat_id=update.effective_chat.id, document=file)
+            logging.info("EPUB file sent successfully")
+        except Exception as e:
+            logging.error(f"An error occurred: {str(e)}")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"An error occurred: {str(e)}")
+    else:
+        logging.error("No URL found in the message")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="No URL found in the message")
 
 def download_telegram_post(url):
     logging.info(f"Downloading post from: {url}")
@@ -48,7 +54,6 @@ def download_telegram_post(url):
     return post_content, images
 
 def create_epub(content, images):
-    logging.info("Creating EPUB file")
     book = epub.EpubBook()
     book.set_identifier('id123456')
     book.set_title('Telegram Post')
@@ -63,8 +68,6 @@ def create_epub(content, images):
     c1.is_chapter = True
     c1.uid = 'chap_01'
     book.add_item(c1)
-    logging.info(f"Sanitized content: {sanitized_content}")
-    logging.info(f"Full HTML content: {c1.content}")
 
     # Ensure cover image is not added multiple times
     if 'cover.jpg' not in [item.file_name for item in book.get_items()]:
@@ -101,47 +104,57 @@ def create_epub(content, images):
     
     return book
 
-def handle_message(update, context):
+async def handle_message(update, context):
     """Handles incoming messages, checking for links or forwarded messages."""
-    if update.message.forward_date:
+    logging.info("handle_message function called")
+    logging.debug(f"Received message: {update.message}")
+    if hasattr(update.message, 'forward_date') and update.message.forward_date:
         # Handle forwarded messages
         forwarded_message = update.message
         if forwarded_message.text:
+            logging.info("Handling forwarded message")
             post_content = forwarded_message.text
             images = []
-            for img in forwarded_message.photo:
-                image_url = img.get_file().file_path
-                logging.info(f"Downloading image from: {image_url}")
-                image_data = requests.get(f"https://api.telegram.org/file/bot{TELEGRAM_API_TOKEN}/{image_url}").content
-                images.append((image_url.split("/")[-1], image_data))
+            #for img in forwarded_message.photo:
+            #    image_url = img.get_file().file_path
+            #    logging.info(f"Downloading image from: {image_url}")
+            #    image_data = requests.get(f"https://api.telegram.org/file/bot{TELEGRAM_API_TOKEN}/{image_url}").content
+            #    images.append((image_url.split("/")[-1], image_data))
             epub_book = create_epub(post_content, images)
             epub.write_epub("post.epub", epub_book)
             with open("post.epub", "rb") as file:
-                context.bot.send_document(chat_id=update.effective_chat.id, document=file)
+                await context.bot.send_document(chat_id=update.effective_chat.id, document=file)
             logging.info("EPUB file sent successfully")
         else:
-            echo(update, context)
+            logging.error("Forwarded message has no text")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="Не могу создать EPUB из этого сообщения")
     elif update.message.text and URL_REGEX.search(update.message.text):
-        handle_link(update, context)
+        logging.info("Message contains a URL")
+        await handle_link(update, context)
     else:
-        echo(update, context)
+        logging.info("Message does not contain a URL or forwarded text")
+        await echo(update, context)
 
-def echo(update, context):
+async def echo(update, context):
     logging.info(f"Echoing message: {update.message.text}")
-    context.bot.send_message(chat_id=update.effective_chat.id, text=f"You said: {update.message.text}")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"You said: {update.message.text}")
 
 def main():
-    logging.info("Starting bot")
-    bot = Bot(token=TELEGRAM_API_TOKEN)
-    updater = Updater(bot=bot)
-    dp = updater.dispatcher
+    logging.info("Bot is starting...")
+    application = ApplicationBuilder().token(TELEGRAM_API_TOKEN).build()
     
-    dp.add_handler(CommandHandler("start", send_welcome))
-    dp.add_handler(MessageHandler(Filters.text, handle_message))
-    
-    updater.start_polling()
-    updater.idle()
-    logging.info("Bot stopped")
+    application.add_handler(CommandHandler("start", send_welcome))
+    application.add_handler(MessageHandler(ext.filters.TEXT & ~ext.filters.COMMAND, handle_message))
+
+    try:
+        logging.info("Bot is running...")
+        application.run_polling()
+    except Exception as e:
+        logging.error(f"An error occurred: {str(e)}")
+    finally:
+        logging.info("Bot is shutting down...")
+        application.stop()
+        logging.info("Bot has shut down.")
 
 if __name__ == '__main__':
     main()

@@ -8,8 +8,6 @@
 
 ## What's Left to Build
 
-*   Telegram bot implementation.
-*   EPUB generator implementation.
 *   Error handling and logging.
 *   Testing.
 
