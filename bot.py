@@ -6,6 +6,7 @@ from ebooklib import epub
 import tempfile
 import shutil
 from datetime import datetime
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -37,41 +38,55 @@ class TelegramToEpub:
             '3. Я создам EPUB файл и отправлю его вам'
         )
 
+    def format_message(self, text):
+        """
+        Сохраняет структуру исходного текста, списки, абзацы.
+        Все упоминания файлов .md подчёркивает (например, _plan.md_).
+        Преобразует переносы строк в <br> и абзацы в <p> для корректного отображения в EPUB.
+        """
+        link_pattern = re.compile(r'\b[\w\-/]+\.md\b', re.IGNORECASE)
+        def underline_md(match):
+            return f"<u>{match.group(0)}</u>"
+        # Разбиваем на абзацы по двойному переносу
+        paragraphs = text.split('\n\n')
+        formatted_paragraphs = []
+        for para in paragraphs:
+            # Подчёркиваем .md-ссылки и заменяем одиночные переносы на <br>
+            para = link_pattern.sub(underline_md, para)
+            para = para.replace('\n', '<br>')
+            formatted_paragraphs.append(f'<p>{para}</p>')
+        return '\n'.join(formatted_paragraphs)
+
     def create_epub(self, message, forwarded_from=None) -> str:
         """Create an EPUB file from the message content."""
         # Generate title from date and sender
         date_str = message.date.strftime("%Y-%m-%d %H:%M")
         sender = forwarded_from or "Unknown"
         title = f"Telegram Message - {date_str} - {sender}"
-        
         # Clean title for filename
         clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
-        
         # Prepare content
+        # ВСЕГДА используем format_message для форматирования текста
+        content_text = self.format_message(message.text)
         content = f"""
         <h1>{title}</h1>
-        <div class="message-content">
-            {message.text_html if message.text_html else message.text}
+        <div class=\"message-content\">
+            {content_text}
         </div>
         """
-        
         # Create EPUB
         book = epub.EpubBook()
         book.set_title(title)
         book.set_language('ru')
-        
         # Add content
         c1 = epub.EpubHtml(title='Content', file_name='content.xhtml', lang='ru')
         c1.content = f'<html><body>{content}</body></html>'
         book.add_item(c1)
-        
         # Add navigation
         book.add_item(epub.EpubNcx())
         book.add_item(epub.EpubNav())
-        
         # Create spine
         book.spine = ['nav', c1]
-        
         # Save the EPUB file
         epub_path = os.path.join(self.temp_dir, f'{clean_title}.epub')
         epub.write_epub(epub_path, book)
