@@ -38,3 +38,34 @@ The Telegram Bot component interacts with the Post Downloader, Content Formatter
 5.  The EPUB Generator generates the EPUB file.
 6.  The File Storage stores the EPUB file.
 7.  The bot sends the EPUB file to the user.
+
+## Testing Approach
+
+The testing strategy for this project uses pytest with mocking:
+
+```
+test_bot.py
+├── TestTelegramToEpub class
+│   ├── Fixtures for mock objects
+│   │   ├── converter (TelegramToEpub instance)
+│   │   ├── mock_update (Telegram Update)
+│   │   ├── mock_context (Telegram Context)
+│   │   ├── mock_forward_from_user (Update with forwarded user message)
+│   │   └── mock_forward_from_chat (Update with forwarded chat message)
+│   │
+│   ├── Command Tests
+│   │   ├── test_start_command
+│   │   └── test_help_command
+│   │
+│   └── Message Handling Tests
+│       ├── test_create_epub
+│       ├── test_handle_non_forwarded_message
+│       ├── test_handle_forwarded_message_from_user
+│       ├── test_handle_forwarded_message_from_chat
+│       └── test_handle_message_exception
+```
+
+- **Mock Implementation**: External dependencies (ebooklib, telegram) are mocked to avoid requiring them during testing
+- **Async Testing**: Using pytest.mark.asyncio for testing async functions
+- **Test Coverage**: Tests cover all main functionality paths
+- **Error Handling**: Tests explicitly verify error handling behavior
