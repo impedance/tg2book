@@ -4,40 +4,39 @@
 
 The system consists of the following components:
 
-*   **Telegram Bot:** Listens for messages containing Telegram post links.
-*   **Post Downloader:** Downloads the Telegram post content from the provided link.
+*   **Telegram Bot:** Listens for forwarded messages from users.
+*   **Message Processor:** Extracts content and metadata from forwarded Telegram messages.
 *   **Content Formatter:**  
   - Formats raw Telegram message data into EPUB-compatible content.
   - Handles text formatting, links, and basic structure.
-  - Adds logic to extract media files from forwarded messages.
-  - Saves images into the EPUB structure with support for `<img>` tags.
+  - Generates appropriate HTML content for the EPUB file.
 *   **EPUB Generator:** Generates the EPUB file from the formatted content.
-*   **File Storage:** Stores the generated EPUB file.
+*   **File Storage:** Temporarily stores the generated EPUB file.
 
 ## Key Technical Decisions
 
 *   Using Python for its ease of use and extensive libraries.
 *   Using `python-telegram-bot` for Telegram bot development.
 *   Using `ebooklib` for EPUB generation.
+*   Using temporary directories for file storage during processing.
 
 ## Design Patterns in Use
 
-*   **Facade:** The Telegram Bot component acts as a facade, hiding the complexity of the other components from the user.
-*   **Strategy:** The Content Formatter component can use different strategies for formatting the content, depending on the type of Telegram post.
+*   **Facade:** The TelegramToEpub class acts as a facade, hiding the complexity of the EPUB generation from the user.
+*   **Command Pattern:** Each bot command handler is implemented as a separate method.
 
 ## Component Relationships
 
-The Telegram Bot component interacts with the Post Downloader, Content Formatter, EPUB Generator, and File Storage components.
+The TelegramToEpub class integrates all components: message processing, content formatting, EPUB generation, and file handling.
 
 ## Critical Implementation Paths
 
-1.  User sends a Telegram post link to the bot.
-2.  The bot forwards the link to the Post Downloader.
-3.  The Post Downloader downloads the content of the post.
-4.  The Content Formatter formats the content.
-5.  The EPUB Generator generates the EPUB file.
-6.  The File Storage stores the EPUB file.
-7.  The bot sends the EPUB file to the user.
+1.  User forwards a Telegram message to the bot.
+2.  The bot extracts the sender information from the forwarded message.
+3.  The bot formats the message content into HTML.
+4.  The EPUB generator creates an EPUB file with the content.
+5.  The file is temporarily stored and then sent back to the user.
+6.  Temporary files are cleaned up.
 
 ## Testing Approach
 

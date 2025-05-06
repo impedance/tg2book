@@ -2,51 +2,57 @@
 
 ## What Works
 
-*   Basic project setup.
-*   Documentation of project goals, architecture, and technologies.
-*   Created implementation plan.
+*   Basic bot functionality is implemented and working.
+*   Core commands (start, help) are functional.
+*   Forwarded message handling is implemented.
+*   EPUB generation from forwarded messages works.
+*   Basic test suite with pytest is in place.
 
 ## What's Left to Build
 
-*   Error handling and logging.
-*   Исправление проблемы с отправкой EPUB файла.
+*   Enhanced formatting options.
+*   Media content handling (images).
+*   Book metadata customization.
+*   Better error handling with detailed messages.
 
 ## Current Status
 
-The project is in the implementation phase.
+The project has a working implementation with basic functionality. The bot can process forwarded messages and generate EPUB files.
 
 ## Known Issues
 
-*   Failed initial attempts to update progress.md due to incorrect SEARCH/REPLACE blocks.
-*   Issues arose from mismatched SEARCH blocks, где содержимое не точно совпадало с файлом.
-*   The need for precise formatting and exact matches в SEARCH/REPLACE operations стала очевидной.
-*   Бот должен отдавать EPUB файл, но не делает этого.
-*   Новая проблема: бот не отправляет EPUB файл после его создания.
+*   No support for media content yet.
+*   Limited formatting options in the generated EPUB.
+*   No metadata customization for the EPUB files.
 
 ## Evolution of Project Decisions
 
-*   The decision to use Python для его легкости использования и обширных библиотек.
-*   The decision to использовать `python-telegram-bot` для разработки Telegram бота.
-*   The decision to использовать `ebooklib` для генерации EPUB файлов.
+*   Using Python for backend development due to its extensive libraries.
+*   Using `python-telegram-bot` for Telegram API integration.
+*   Using `ebooklib` for EPUB file generation.
+*   Using temporary directories for file operations to ensure proper cleanup.
 
-## 2024-06-XX - Development Infrastructure
+## 2024-06-18 - Initial Implementation
 
 - Created a project structure for the Telegram to EPUB bot
 - Implemented core functionality:
   - Start command
   - Help command
-  - EPUB creation
-  - Handling forwarded messages from users and chats
+  - EPUB creation from forwarded messages
+  - Handling different types of forwarded origins (user, chat, hidden_user)
   - Basic error handling
 - Used python-telegram-bot for Telegram API integration
 - Used ebooklib for EPUB file generation
+- Set up test infrastructure with pytest
 
 ### Status
 - Basic functionality implemented
 - Core bot commands are working
-- EPUB generation is functional
+- EPUB generation from forwarded messages is functional
+- Test suite with core test cases is in place
 
 ### Next Steps
+- Add support for media content in forwarded messages
+- Enhance EPUB formatting for better readability
+- Implement book metadata customization options
 - Improve error handling with more detailed messages
-- Add support for more message types
-- Consider adding metadata customization options
