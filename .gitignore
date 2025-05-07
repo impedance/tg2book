@@ -54,3 +54,4 @@ htmlcov/
 *.png
 *.gif
 *.mp4
+.env
