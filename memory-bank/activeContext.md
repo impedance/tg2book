@@ -22,10 +22,7 @@ We are currently working on improving code quality for the bot:
 
 ## Next Steps
 
-2. Add support for media content in forwarded messages
-1. Improve error handling in message processing
-3. Enhance EPUB formatting for better readability
-4. Implement book metadata customization options
+- Implement Dropbox integration (see memory-bank/dropbox_integration.md)
 
 ## Active Decisions and Considerations
 - Chose to handle forwarded messages by extracting content and metadata.

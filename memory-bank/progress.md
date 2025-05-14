@@ -14,6 +14,7 @@
 *   Media content handling (images).
 *   Book metadata customization.
 *   Better error handling with detailed messages.
+- Dropbox integration
 
 ## Current Status
 
@@ -24,7 +25,6 @@ The project has a working implementation with basic functionality. The bot can p
 *   No support for media content yet.
 *   Limited formatting options in the generated EPUB.
 *   Empty first page in EPUB output (title page separated from content)
-*   No metadata customization for the EPUB files.
 
 ## Evolution of Project Decisions
 
@@ -71,6 +71,3 @@ The project has a working implementation with basic functionality. The bot can p
    - CSS normalization
    - Whitespace optimization in generated HTML
 
-### Status
-- Planning phase completed
-- Ready for implementation in Act Mode
