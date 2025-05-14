@@ -23,6 +23,7 @@ The project has a working implementation with basic functionality. The bot can p
 
 *   No support for media content yet.
 *   Limited formatting options in the generated EPUB.
+*   Empty first page in EPUB output (title page separated from content)
 *   No metadata customization for the EPUB files.
 
 ## Evolution of Project Decisions
@@ -45,14 +46,31 @@ The project has a working implementation with basic functionality. The bot can p
 - Used ebooklib for EPUB file generation
 - Set up test infrastructure with pytest
 
-### Status
-- Basic functionality implemented
-- Core bot commands are working
-- EPUB generation from forwarded messages is functional
-- Test suite with core test cases is in place
+## 2025-05-14 - EPUB Structure Optimization
+
+### Implemented
+- Added analysis phase for EPUB structure:
+  - Verified EpubHtml parameters
+  - Audited spine/navigation structure
+- Prepared refactoring plan:
+  - Content unification strategy
+  - HTML cleanup requirements
 
 ### Next Steps
-- Add support for media content in forwarded messages
-- Enhance EPUB formatting for better readability
-- Implement book metadata customization options
-- Improve error handling with more detailed messages
+1. Code modifications:
+   - Merge title and content in create_epub method (lines 47-54)
+   - Remove duplicate HTML tags
+   - Adjust section metadata
+
+2. Validation steps:
+   - Generate test EPUB files
+   - Verify in Calibre, Apple Books, FBReader
+   - Run epubcheck 4.2.6 validation
+
+3. Additional improvements:
+   - CSS normalization
+   - Whitespace optimization in generated HTML
+
+### Status
+- Planning phase completed
+- Ready for implementation in Act Mode
