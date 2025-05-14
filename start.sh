@@ -4,7 +4,7 @@
 source venv/bin/activate
 
 # Load environment variables from .env file
-source .env
+export $(grep -v '^#' .env | xargs)
 
 # Run the bot
 python bot.py
