@@ -95,12 +95,12 @@ class TelegramToEpub:
         c1.content = f'<html><body>{content}</body></html>'
         book.add_item(c1)
         
-        # Add navigation
+        # Add navigation (required by EPUB standard but not in spine)
         book.add_item(epub.EpubNcx())
         book.add_item(epub.EpubNav())
         
-        # Create spine
-        book.spine = ['nav', c1]
+        # Create spine - start directly with content, no navigation page
+        book.spine = [c1]
         
         # Save the EPUB file
         epub_path = os.path.join(self.temp_dir, f'{clean_title}.epub')
