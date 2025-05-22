@@ -1,19 +1,23 @@
 import os
 import logging
+logging.basicConfig(
+    filename='bot.log',
+    filemode='w',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG
+)
+logger = logging.getLogger(__name__)
 from telegram import Update
+
+logger.setLevel(logging.DEBUG)
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from ebooklib import epub
 import tempfile
 import shutil
 from datetime import datetime
 import re
+import dropbox
 
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 class TelegramToEpub:
     def __init__(self):
@@ -95,34 +99,115 @@ class TelegramToEpub:
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages."""
         message = update.message
-        
+
         # Check if message is forwarded
-        if not message.forward_origin:
+        # if not hasattr(message, 'forward_origin') or not message.forward_origin:
+        #     logger.info("Сообщение не является пересланным.")
+        #     await message.reply_text(
+        #         "Пожалуйста, перешлите мне сообщение, которое вы хотите конвертировать в EPUB."
+        #     )
+        #     return
+        # else:
+        #     logger.info("Сообщение является пересланным.")
+
+        # Check if message contains text
+        if not message.text:
+            logger.info("Сообщение не содержит текста.")
             await message.reply_text(
-                "Пожалуйста, перешлите мне сообщение, которое вы хотите конвертировать в EPUB."
+                "Сообщение не содержит текста. Пожалуйста, перешлите сообщение с текстом."
             )
             return
+
+        logger.info(f"Начало обработки сообщения от пользователя: {message.chat.id}")
+
+        reply_text = f"Получено сообщение:\n"
+        reply_text += f"Chat ID: {message.chat.id}\n"
+        reply_text += f"Message ID: {message.message_id}\n"
+        reply_text += f"Text: {message.text}\n"
+
+        if hasattr(message, 'forward_origin') and message.forward_origin:
+            reply_text += f"Is Forwarded: True\n"
+            reply_text += f"Forward Origin Type: {message.forward_origin.type}\n"
+            if message.forward_origin.type == "user" and message.forward_origin.sender_user:
+                reply_text += f"Forwarded from User: {message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username}\n"
+            elif message.forward_origin.type == "chat" and message.forward_origin.sender_chat:
+                reply_text += f"Forwarded from Chat: {message.forward_origin.sender_chat.title}\n"
+            elif message.forward_origin.type == "hidden_user":
+                reply_text += f"Forwarded from: Anonymous User\n"
+        else:
+            reply_text += f"Is Forwarded: False\n"
+
+        await message.reply_text(reply_text)
 
         try:
             # Get sender info
             forwarded_from = None
-            if message.forward_origin.type == "user":
-                forwarded_from = message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username
-            elif message.forward_origin.type == "chat":
-                forwarded_from = message.forward_origin.sender_chat.title
-            elif message.forward_origin.type == "hidden_user":
-                forwarded_from = "Anonymous User"
+            if hasattr(message, 'forward_origin') and message.forward_origin:
+                if message.forward_origin.type == "user" and message.forward_origin.sender_user:
+                    forwarded_from = message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username
+                elif message.forward_origin.type == "chat" and message.forward_origin.sender_chat:
+                    forwarded_from = message.forward_origin.sender_chat.title
+                elif message.forward_origin.type == "hidden_user":
+                    forwarded_from = "Anonymous User"
+
+                logger.info(f"Тип forward_origin: {message.forward_origin.type}")
+                if message.forward_origin.type == "user":
+                    logger.info(f"sender_user: {message.forward_origin.sender_user}")
+                elif message.forward_origin.type == "chat":
+                    logger.info(f"sender_chat: {message.forward_origin.sender_chat}")
+
+                logger.info(f"Сообщение переслано от: {forwarded_from}")
+            else:
+                logger.info("Сообщение не является пересланным.")
+                forwarded_from = "Unknown"
 
             # Create EPUB
+            logger.info("Создание EPUB файла...")
             epub_path = self.create_epub(message, forwarded_from)
-            
+            logger.info(f"EPUB файл создан: {epub_path}")
+            if os.path.exists(epub_path):
+                logger.info(f"Файл существует по пути: {epub_path}")
+            else:
+                logger.error(f"Файл не существует по пути: {epub_path}")
+
+            # logger.info("Проверка токена Dropbox...")
+            # # Get the Dropbox token from environment variable
+            # dropbox_token = os.getenv('DROPBOX_TOKEN')
+            # if not dropbox_token:
+            #     logger.error("DROPBOX_TOKEN environment variable not set")
+            #     await message.reply_text("Ошибка: Токен Dropbox не установлен.")
+            #     return
+            # logger.info("Токен Dropbox успешно загружен.")
+
+            # # Upload EPUB file to Dropbox
+            # logger.info("Попытка загрузки файла в Dropbox...")
+            # try:
+            #     dbx = dropbox.Dropbox(dropbox_token)
+            #     logger.info("Клиент Dropbox инициализирован.")
+            #     file_path = f'/All files/Apps/Dropbox PocketBook/from-bot/{message.date.strftime("%Y-%m-%d %H:%M")} - {forwarded_from}.epub'
+            #     logger.info(f"Загрузка файла в Dropbox: {file_path}")
+            #     with open(epub_path, 'rb') as f:
+            #         dbx.files_upload(f.read(), file_path)
+            #     logger.info("Файл успешно загружен в Dropbox!")
+            #     await message.reply_text("Файл успешно загружен в Dropbox!")
+            # except Exception as e:
+            #     logger.error(f"Ошибка при загрузке в Dropbox: {e}")
+            #     print(e)
+            #     await message.reply_text("Извините, произошла ошибка при загрузке файла в Dropbox.")
+
             # Send EPUB file
-            with open(epub_path, 'rb') as epub_file:
-                await message.reply_document(
-                    document=epub_file,
-                    filename=f"message.epub",
-                    caption="Вот ваш EPUB файл!"
-                )
+            logger.info("Отправка EPUB файла пользователю...")
+            try:
+                with open(epub_path, 'rb') as epub_file:
+                    await message.reply_document(
+                        document=epub_file,
+                        filename=f"message.epub",
+                        caption="Вот ваш EPUB файл!"
+                    )
+                logger.info("EPUB файл успешно отправлен.")
+            except Exception as e:
+                logger.error(f"Ошибка при отправке EPUB файла: {e}")
+                await message.reply_text("Извините, произошла ошибка при отправке файла.")
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             await message.reply_text("Извините, произошла ошибка при обработке вашего сообщения.")
@@ -135,6 +220,13 @@ def main():
         logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
         return
 
+    # Get the Dropbox token from environment variable
+    # dropbox_token = os.getenv('DROPBOX_TOKEN')
+    # if not dropbox_token:
+    #     logger.error("DROPBOX_TOKEN environment variable not set")
+    #     # It's critical to exit if the Dropbox token is not set, as the bot will not function correctly.
+    #     return
+
     # Create the Application and pass it your bot's token
     application = Application.builder().token(token).build()
 
@@ -144,7 +236,7 @@ def main():
     # Add handlers
     application.add_handler(CommandHandler("start", converter.start))
     application.add_handler(CommandHandler("help", converter.help))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, converter.handle_message))
+    application.add_handler(MessageHandler(filters.ALL, converter.handle_message))
 
     # Start the Bot
     application.run_polling()
