@@ -3,29 +3,36 @@ import dropbox
 import sys
 
 def upload_file(local_path, dropbox_path):
+    """
+    Загружает файл в ЛЮБУЮ папку Dropbox
+    Пример пути: "/Work/Project/docs/file.txt"
+    """
     try:
-        # Замените <ACCESS_TOKEN> на токен с правами files.content.write
-        dbx = dropbox.Dropbox("sl.u.AFsiN39lQLVFZCCg-FbdRtwUQwyHIcwo_EHGdxV6VvXtUZwcWVX1m6zW1ZIcj5aShoIwPOzLWqBFXe7TnEQi2osguQd3il80i-NuW8eLFDX68intrPYAe1r2-JXbCdlJvf96_NgbeLbhnQb_veYvj3H1Asdvy32ufAVzqNmZ9ErzO4dz-uhzUevfdYKDwNHpfDEn4zQy_NNTKJ0PMr6doVZsyWzfKoL4CqfCFmIWOolwiJzQSXOcEb1NvNUovgS2hwGMwrUVoTRgF8jjekYHggZMd5d1560ltNCA3-m9KnqgvaVKQqqn28T9ldIzbTiW45UtrdtTfH2QrKIVniYFwlUUJJ_mn-Q2kY4Yu8zTJVsesPtBDUYua3ywmn9gzCHwfzdfnTzPGkFuKXFb31ddxqobxtGnjFPv970Tuj651Np5vhg7-5g-Rh2sz8VhzkKtMGuaqWhbfLobii1Th78RPaJJPexEZlVXr3MRm-mYsambWb47MaOAD8gQDCpOtPiRpuJolblFbZO_sUmXFsFIR2AKJoSnHGUbZ7avx62OySshdoMj08Mtt1LLLOg09NizWTd3e27iBWendS-K-u24JtATUYLAKwwyUWMqqrJ8DBCyutJJU3lEhtuCgNJZnjVYtguMWm_ixGgpvF_W5t4jAi-J_Wk01BEAOMYA4XmbK85v1erNToa0cjYJGSPyT1xn79qvohiynyUkjcVTjJc6WW1mQgY0dEsHHaeqtQ_qs9IyF2m8ZGElreWZpkTts-3F-VKUbeR5MGcYK3Nkn9Rbg4TQDa82C6RCAdgim1pQNJlOz66fhSRit03-_vYsghP5LdO-1e91KBYFuC0w8gkgStzoO7L2RctOhxmqYV_Kvx7RMVzWoMZWb_qYkfuMGnDadnPM7GFISn-9chG8q0xJXN0iHw-f8-pOsQUjTqMH4EzKgO-H-Z5z9b7L6Kphxl6axEktENqsvmGLC8AnqcUYMuaXbGIeeDzuS50y_biuOI4LPeDFdPFyQ2aqejb1EnmCIfP64opLPdDzqdQtOBp-rY5CH0s1x8hkaG-h9-p6Cm_jqnkI7vokAX_tBkFLnVnv2kKcUFVtqwQ0EU_JlXUQE374Epqzd5pNLiGDyAcKQf271XzCHNfFle_chrIJacIuJSmrbyDlAAkYwgVvIC0ecgY1X2B3hOPyhwTXhVpqc5tNAX3aoJLi09TJFmFx2xND28aFjqZPKm2PyHeN1aicYApr9AGcabPP8nadbO911lIUaWnUOP0fZnto_oFLy426-mjfs")
+        dbx = dropbox.Dropbox("sl.u.AFtS6VaDRDHFbQ_67o0FdDw_MjFY4ESyxdW1ke3AwToFlo0DrYRojkJ-uQhN-R1WBgLKt0Z2Nkc9VkFzQU6oTv3ycGzI1LansLGlIVZO6-I3PXbYLkSB4q4A331Dsg_98lAZlfImeSM2GjbnvpymH5n0gzGUIFKvPg3Q3mu3Z4Ic7AOqk03tqWe9NBJ4xbrze2YcBZ4h5TdRdcWP7aCH9UsDOzNwV7WTA2yEb38E38tm0fWf26sM7R2NkFKL6wmbQaRPyxxkUHpBHeUtq227LSAfBpQjhcXcmP72o5vR3yuM2UICqyQgquitXn0-jtdVCk_ihsxAt4OJ7jxxM3H1Pz4fYbeZVcLzfHiLyTCy7lYg0pHR4AnzCxwiFWgRbD_SaQyp37wY_xNsMfaw7fCs11lIAsUKmmGHltNKNcsMeJaTBM36-lzCffeCDlPmx4vCPGeHdOwe6KM06o_ZS6cmvCNTIC7kcvp9iQ5eb0PMH1Sna5r2BwI-gceRsL1911tFwrrj00F7VlUoG5TMeklsJ6NMhyiJtrOYCrRVPX59MDxrH99pMGsLDJ1SLw_iYSEoybskxMlDkJU1yWefzOtCtDYw6uo6KBZmaQ8eQZ67C5Hlu2yeiuWlv3uadUy_OgJw9NXlq33sdUCooFeAn7ywGyADNls0kAfPMB_jmmBrQrZVB2SNoApkqUwsBUHdS-jCAWA9kAzmY5q_xi4FplQ7UN8nWxBSb--eyo5kEfLuPOzL0LxDfChl1-KU3ae2WOx04lzBjwPZjUIaRA4qDgRapq1Letbk6Q1GyXPHIWQuTbxlzTKp6Z45BPgSvUby7EFTItTbwhDEkCwZNB1Kev4qv40BD4sQYA_PTyKhUAYscIwWRRSGt9S5XZAFPf4kzQ9Vc_xTQ_FymNyeHeUASzVVY9EFNZQhONWbowad0I0pRVVPIVaVl7i7yBSxr9SZDUj9DavsM9EEm4aBKiLwqo5suFrbkl58xBQNjZ3HJgXQQyPTzoWQt8Et9K9e9y3JDdDGpNiVE-f95ET_XPJbinUNx_nE6NVrH7UoKwkFfuU7sw0RRJL_lq23HZmo-_Gpn5MCzQi6yXNTWzRDoXr62UpvSq9y8XdbPkqum_DwB5mbnoR70do37AiRERslUIbESbDlkFEIqstGlh7C1SKDZAJOcsBPnU3S8E51WaYW74o5JmBP3nZoF_6vVVIFYzvTNhPZ72BfzhczAXHtcocNVXaJT-4qObrvK9w7BIikiCdInRLvBDPFpt1SH6EF0SSdXaxTA0U")  # Токен с полным доступом
         
+        # Проверка и нормализация пути
+        if not dropbox_path.startswith('/'):
+            dropbox_path = '/' + dropbox_path
+            
         with open(local_path, "rb") as f:
             dbx.files_upload(
                 f.read(),
                 dropbox_path,
-                mode=dropbox.files.WriteMode("overwrite")
+                mode=dropbox.files.WriteMode.overwrite
             )
-            print(f"[SUCCESS] Uploaded: {local_path} -> {dropbox_path}")
+            print(f"Файл загружен в: {dropbox_path}")
             return True
             
-    except dropbox.exceptions.AuthError as e:
-        print(f"[ERROR] Invalid token or missing permissions: {e}", file=sys.stderr)
+    except dropbox.exceptions.ApiError as e:
+        print(f"Ошибка Dropbox: {e.error}", file=sys.stderr)
     except Exception as e:
-        print(f"[ERROR] {e}", file=sys.stderr)
+        print(f"Ошибка: {e}", file=sys.stderr)
     return False
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("Usage: python dropbox-loader.py <local_file> <dropbox_path>")
-        print('Example: python dropbox-loader.py test.txt "/test_folder/test.txt"')
+        print("Использование: python script.py <локальный_файл> <полный_путь_на_dropbox>")
+        print('Пример: python script.py report.pdf "/Финансы/2023/Отчеты/report.pdf"')
         sys.exit(1)
     
     upload_file(sys.argv[1], sys.argv[2])
