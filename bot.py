@@ -132,28 +132,27 @@ class TelegramToEpub:
             return
 
         logger.info(f"Начало обработки сообщения от пользователя: {message.chat.id}")
-
-        reply_text = f"Получено сообщение:\n"
-        reply_text += f"Chat ID: {message.chat.id}\n"
-        reply_text += f"Message ID: {message.message_id}\n"
-        reply_text += f"Text: {message.text or 'None'}\n"
-        reply_text += f"Caption: {message.caption or 'None'}\n"
+        
+        # Log debug info but don't send to user
+        logger.info(f"Message ID: {message.message_id}")
+        logger.info(f"Text: {message.text or 'None'}")
+        logger.info(f"Caption: {message.caption or 'None'}")
 
         if hasattr(message, 'forward_origin') and message.forward_origin:
-            reply_text += f"Is Forwarded: True\n"
-            reply_text += f"Forward Origin Type: {message.forward_origin.type}\n"
+            logger.info(f"Is Forwarded: True, Type: {message.forward_origin.type}")
             if message.forward_origin.type == "user" and message.forward_origin.sender_user:
-                reply_text += f"Forwarded from User: {message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username}\n"
+                logger.info(f"Forwarded from User: {message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username}")
             elif message.forward_origin.type == "chat" and message.forward_origin.sender_chat:
-                reply_text += f"Forwarded from Chat: {message.forward_origin.sender_chat.title}\n"
+                logger.info(f"Forwarded from Chat: {message.forward_origin.sender_chat.title}")
             elif message.forward_origin.type == "channel" and message.forward_origin.sender_chat:
-                reply_text += f"Forwarded from Channel: {message.forward_origin.sender_chat.title}\n"
+                logger.info(f"Forwarded from Channel: {message.forward_origin.sender_chat.title}")
             elif message.forward_origin.type == "hidden_user":
-                reply_text += f"Forwarded from: Anonymous User\n"
+                logger.info(f"Forwarded from: Anonymous User")
         else:
-            reply_text += f"Is Forwarded: False\n"
-
-        await message.reply_text(reply_text)
+            logger.info(f"Is Forwarded: False")
+        
+        # Optionally send a brief processing message
+        processing_msg = await message.reply_text("📚 Создаю EPUB файл...")
 
         try:
             # Get sender info
@@ -189,19 +188,26 @@ class TelegramToEpub:
             # Send EPUB file
             logger.info("Отправка EPUB файла пользователю...")
             try:
+                # Delete the processing message
+                await processing_msg.delete()
+                
                 with open(epub_path, 'rb') as epub_file:
                     await message.reply_document(
                         document=epub_file,
                         filename=f"message.epub",
-                        caption="Вот ваш EPUB файл!"
+                        caption="📖 Ваш EPUB файл готов!"
                     )
                 logger.info("EPUB файл успешно отправлен.")
             except Exception as e:
                 logger.error(f"Ошибка при отправке EPUB файла: {e}")
-                await message.reply_text("Извините, произошла ошибка при отправке файла.")
+                await message.reply_text("❌ Извините, произошла ошибка при отправке файла.")
         except Exception as e:
             logger.error(f"Error processing message: {e}")
-            await message.reply_text("Извините, произошла ошибка при обработке вашего сообщения.")
+            try:
+                await processing_msg.delete()
+            except:
+                pass
+            await message.reply_text("❌ Извините, произошла ошибка при обработке вашего сообщения.")
 
 def main():
     """Start the bot."""
