@@ -77,9 +77,8 @@ class TelegramToEpub:
         # Clean title for filename
         clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
         
-        # Prepare content from message text
+        # Prepare content from message text - without title header
         content = f"""
-        <h1>{title}</h1>
         <div class=\"message-content\">
             {self.format_message(text_content)}
         </div>
