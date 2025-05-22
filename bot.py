@@ -26,6 +26,10 @@ class TelegramToEpub:
     def __del__(self):
         shutil.rmtree(self.temp_dir)
 
+    def get_message_text(self, message):
+        """Get text content from message.text or message.caption"""
+        return message.text or message.caption or ""
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Send a message when the command /start is issued."""
         await update.message.reply_text(
@@ -62,35 +66,42 @@ class TelegramToEpub:
         return '\n'.join(formatted_paragraphs)
 
     def create_epub(self, message, forwarded_from=None) -> str:
-        """Create an EPUB file from the message content."""
+        """Create an EPUB file from the message text content."""
+        # Get text content from message.text or message.caption
+        text_content = self.get_message_text(message)
+        
         # Generate title from date and sender
         date_str = message.date.strftime("%Y-%m-%d %H:%M")
         sender = forwarded_from or "Unknown"
         title = f"Telegram Message - {date_str} - {sender}"
         # Clean title for filename
         clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
-        # Prepare content
-        # ВСЕГДА используем format_message для форматирования текста
-        content_text = self.format_message(message.text)
+        
+        # Prepare content from message text
         content = f"""
         <h1>{title}</h1>
         <div class=\"message-content\">
-            {content_text}
+            {self.format_message(text_content)}
         </div>
         """
+        
         # Create EPUB
         book = epub.EpubBook()
         book.set_title(title)
         book.set_language('ru')
+        
         # Add content
         c1 = epub.EpubHtml(title='Content', file_name='content.xhtml', lang='ru')
         c1.content = f'<html><body>{content}</body></html>'
         book.add_item(c1)
+        
         # Add navigation
         book.add_item(epub.EpubNcx())
         book.add_item(epub.EpubNav())
+        
         # Create spine
         book.spine = ['nav', c1]
+        
         # Save the EPUB file
         epub_path = os.path.join(self.temp_dir, f'{clean_title}.epub')
         epub.write_epub(epub_path, book)
@@ -100,18 +111,20 @@ class TelegramToEpub:
         """Handle incoming messages."""
         message = update.message
 
-        # Check if message is forwarded
-        # if not hasattr(message, 'forward_origin') or not message.forward_origin:
-        #     logger.info("Сообщение не является пересланным.")
-        #     await message.reply_text(
-        #         "Пожалуйста, перешлите мне сообщение, которое вы хотите конвертировать в EPUB."
-        #     )
-        #     return
-        # else:
-        #     logger.info("Сообщение является пересланным.")
+        # Get text content from message.text or message.caption
+        text_content = self.get_message_text(message)
 
-        # Check if message contains text
-        if not message.text:
+        # Check if message contains text content
+        if hasattr(message, 'forward_origin') and message.forward_origin:
+            # Handle forwarded messages - check all supported types including channel
+            if message.forward_origin.type in ["user", "chat", "hidden_user", "channel"]:
+                if not text_content:
+                    logger.info("Forwarded message does not contain text")
+                    await message.reply_text(
+                        "Пересланное сообщение не содержит текста. Пожалуйста, перешлите сообщение с текстом."
+                    )
+                    return
+        elif not text_content:
             logger.info("Сообщение не содержит текста.")
             await message.reply_text(
                 "Сообщение не содержит текста. Пожалуйста, перешлите сообщение с текстом."
@@ -123,7 +136,8 @@ class TelegramToEpub:
         reply_text = f"Получено сообщение:\n"
         reply_text += f"Chat ID: {message.chat.id}\n"
         reply_text += f"Message ID: {message.message_id}\n"
-        reply_text += f"Text: {message.text}\n"
+        reply_text += f"Text: {message.text or 'None'}\n"
+        reply_text += f"Caption: {message.caption or 'None'}\n"
 
         if hasattr(message, 'forward_origin') and message.forward_origin:
             reply_text += f"Is Forwarded: True\n"
@@ -132,6 +146,8 @@ class TelegramToEpub:
                 reply_text += f"Forwarded from User: {message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username}\n"
             elif message.forward_origin.type == "chat" and message.forward_origin.sender_chat:
                 reply_text += f"Forwarded from Chat: {message.forward_origin.sender_chat.title}\n"
+            elif message.forward_origin.type == "channel" and message.forward_origin.sender_chat:
+                reply_text += f"Forwarded from Channel: {message.forward_origin.sender_chat.title}\n"
             elif message.forward_origin.type == "hidden_user":
                 reply_text += f"Forwarded from: Anonymous User\n"
         else:
@@ -145,7 +161,7 @@ class TelegramToEpub:
             if hasattr(message, 'forward_origin') and message.forward_origin:
                 if message.forward_origin.type == "user" and message.forward_origin.sender_user:
                     forwarded_from = message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username
-                elif message.forward_origin.type == "chat" and message.forward_origin.sender_chat:
+                elif message.forward_origin.type in ["chat", "channel"] and message.forward_origin.sender_chat:
                     forwarded_from = message.forward_origin.sender_chat.title
                 elif message.forward_origin.type == "hidden_user":
                     forwarded_from = "Anonymous User"
@@ -153,7 +169,7 @@ class TelegramToEpub:
                 logger.info(f"Тип forward_origin: {message.forward_origin.type}")
                 if message.forward_origin.type == "user":
                     logger.info(f"sender_user: {message.forward_origin.sender_user}")
-                elif message.forward_origin.type == "chat":
+                elif message.forward_origin.type in ["chat", "channel"]:
                     logger.info(f"sender_chat: {message.forward_origin.sender_chat}")
 
                 logger.info(f"Сообщение переслано от: {forwarded_from}")
@@ -169,31 +185,6 @@ class TelegramToEpub:
                 logger.info(f"Файл существует по пути: {epub_path}")
             else:
                 logger.error(f"Файл не существует по пути: {epub_path}")
-
-            # logger.info("Проверка токена Dropbox...")
-            # # Get the Dropbox token from environment variable
-            # dropbox_token = os.getenv('DROPBOX_TOKEN')
-            # if not dropbox_token:
-            #     logger.error("DROPBOX_TOKEN environment variable not set")
-            #     await message.reply_text("Ошибка: Токен Dropbox не установлен.")
-            #     return
-            # logger.info("Токен Dropbox успешно загружен.")
-
-            # # Upload EPUB file to Dropbox
-            # logger.info("Попытка загрузки файла в Dropbox...")
-            # try:
-            #     dbx = dropbox.Dropbox(dropbox_token)
-            #     logger.info("Клиент Dropbox инициализирован.")
-            #     file_path = f'/All files/Apps/Dropbox PocketBook/from-bot/{message.date.strftime("%Y-%m-%d %H:%M")} - {forwarded_from}.epub'
-            #     logger.info(f"Загрузка файла в Dropbox: {file_path}")
-            #     with open(epub_path, 'rb') as f:
-            #         dbx.files_upload(f.read(), file_path)
-            #     logger.info("Файл успешно загружен в Dropbox!")
-            #     await message.reply_text("Файл успешно загружен в Dropbox!")
-            # except Exception as e:
-            #     logger.error(f"Ошибка при загрузке в Dropbox: {e}")
-            #     print(e)
-            #     await message.reply_text("Извините, произошла ошибка при загрузке файла в Dropbox.")
 
             # Send EPUB file
             logger.info("Отправка EPUB файла пользователю...")
@@ -219,13 +210,6 @@ def main():
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
         return
-
-    # Get the Dropbox token from environment variable
-    # dropbox_token = os.getenv('DROPBOX_TOKEN')
-    # if not dropbox_token:
-    #     logger.error("DROPBOX_TOKEN environment variable not set")
-    #     # It's critical to exit if the Dropbox token is not set, as the bot will not function correctly.
-    #     return
 
     # Create the Application and pass it your bot's token
     application = Application.builder().token(token).build()
