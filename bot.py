@@ -17,6 +17,9 @@ import shutil
 from datetime import datetime
 import re
 import dropbox
+import subprocess
+import time
+import threading
 
 
 class TelegramToEpub:
@@ -106,6 +109,10 @@ class TelegramToEpub:
         date_str = message.date.strftime("%m-%d-%y_%H-%M")
         epub_path = os.path.join("docs", f'msg-{date_str}.epub')
         epub.write_epub(epub_path, book)
+        
+        # Upload to Dropbox in a separate thread
+        threading.Thread(target=self.upload_to_dropbox, args=(epub_path,)).start()
+        
         return epub_path
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -209,6 +216,19 @@ class TelegramToEpub:
             except:
                 pass
             await message.reply_text("❌ Извините, произошла ошибка при обработке вашего сообщения.")
+    
+    def upload_to_dropbox(self, epub_path):
+        """Upload the EPUB file to Dropbox using dropbox-loader.py."""
+        try:
+            command = f"python3 dropbox-loader.py {epub_path} '/Apps/Dropbox PocketBook/from-bot/{os.path.basename(epub_path)}'"
+            process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            if stderr:
+                logger.error(f"Dropbox upload failed: {stderr.decode()}")
+            else:
+                logger.info(f"Dropbox upload successful: {stdout.decode()}")
+        except Exception as e:
+            logger.error(f"Error uploading to Dropbox: {e}")
 
 def main():
     """Start the bot."""
