@@ -102,7 +102,9 @@ class TelegramToEpub:
         book.spine = [c1]
         
         # Save the EPUB file
-        epub_path = os.path.join(self.temp_dir, f'{clean_title}.epub')
+        os.makedirs("docs", exist_ok=True)
+        date_str = message.date.strftime("%m-%d-%y_%H-%M")
+        epub_path = os.path.join("docs", f'msg-{date_str}.epub')
         epub.write_epub(epub_path, book)
         return epub_path
 
