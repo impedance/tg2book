@@ -20,7 +20,16 @@ import dropbox
 import subprocess
 import time
 import threading
+import requests
 
+def refresh_access_token():
+    url = "https://api.dropbox.com/oauth2/token"
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": os.getenv("DROPBOX_REFRESH_TOKEN")
+    }
+    response = requests.post(url, data=data, auth=(os.getenv("DROPBOX_APP_KEY"), os.getenv("DROPBOX_APP_SECRET")))
+    return response.json()["access_token"]
 
 class TelegramToEpub:
     def __init__(self):
@@ -106,7 +115,7 @@ class TelegramToEpub:
         
         # Save the EPUB file
         os.makedirs("docs", exist_ok=True)
-        date_str = message.date.strftime("%m-%d-%y_%H-%M")
+        date_str = message.date.strftime("%m-%d-%y_%H-%M-%S")
         epub_path = os.path.join("docs", f'msg-{date_str}.epub')
         epub.write_epub(epub_path, book)
         
@@ -220,7 +229,9 @@ class TelegramToEpub:
     def upload_to_dropbox(self, epub_path):
         """Upload the EPUB file to Dropbox using dropbox-loader.py."""
         try:
-            command = f"python3 dropbox-loader.py {epub_path} '/Apps/Dropbox PocketBook/from-bot/{os.path.basename(epub_path)}'"
+            # Refresh access token
+            access_token = refresh_access_token()
+            command = f"python3 dropbox-loader.py {epub_path} '/Apps/Dropbox PocketBook/from-bot/{os.path.basename(epub_path)}' --access-token {access_token}"
             process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
             if stderr:
