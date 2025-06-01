@@ -24,66 +24,80 @@ def refresh_access_token():
     app_key = os.getenv("DROPBOX_APP_KEY")
     app_secret = os.getenv("DROPBOX_APP_SECRET")
 
-    logging.info("DROPBOX_APP_KEY: {}".format(app_key))
-    logging.info("DROPBOX_APP_SECRET: {}".format(app_secret))
-    logging.info("DROPBOX_REFRESH_TOKEN: {}".format(os.getenv("DROPBOX_REFRESH_TOKEN")))
-
-    logging.info("Requesting new access token from Dropbox...")
     response = requests.post(url, data=data, auth=(app_key, app_secret))
-    logging.info(f"Dropbox API response: {response.status_code} - {redact_access_token(response.text)}")
+    
     if response.status_code == 200:
         access_token = response.json()["access_token"]
-        logging.info("Successfully obtained access token.")
         return access_token
     else:
-        logging.error(f"Failed to refresh access token: {response.status_code} - {response.text}")
+        logging.error(f"Failed to refresh access token: {response.status_code}")
         return None
 
 def upload_to_dropbox(file_path):
     """Uploads a file to Dropbox."""
     try:
+        logging.info(f"Начинаем загрузку файла: {file_path}")
+        
+        # Проверяем существование локального файла
+        if not os.path.exists(file_path):
+            logging.error(f"Локальный файл не существует: {file_path}")
+            return False
+        
+        file_size = os.path.getsize(file_path)
+        logging.info(f"Размер файла: {file_size} байт")
+
         # Refresh access token
-        logging.info("Refreshing access token...")
+        logging.info("Получаем access token...")
         access_token = refresh_access_token()
 
         if not access_token:
             logging.error("Failed to obtain access token. Aborting upload.")
             return False
 
-        logging.info(f"Access token: {access_token[:3] + '...' if access_token else access_token}")
+        logging.info("Access token получен успешно")
+
+        # Формируем путь в Dropbox (добавляем имя файла к папке)
+        filename = os.path.basename(file_path)
+        dropbox_folder = "/Apps/Dropbox PocketBook/from-bot/"
+        dropbox_full_path = dropbox_folder + filename
+        
+        logging.info(f"Локальный файл: {file_path}")
+        logging.info(f"Папка в Dropbox: {dropbox_folder}")
+        logging.info(f"Полный путь в Dropbox: {dropbox_full_path}")
 
         # Construct the upload command
-        logging.info("Constructing upload command...")
-        # Redact access token in log
-        redacted_token = access_token[:3] + "..." if access_token else access_token
         command = [
             "python3",
             "dropbox-loader.py",
             file_path,
-            "'/Apps/Dropbox PocketBook/from-bot/'",
+            dropbox_full_path,
             "--access-token",
             access_token
         ]
-        logging.info(f"Upload command: {command[:5] + [redacted_token]}")
+        
+        # Логируем команду (без токена)
+        safe_command = command.copy()
+        safe_command[-1] = "***HIDDEN***"
+        logging.info(f"Команда для выполнения: {safe_command}")
 
         # Execute the command
-        logging.info("Executing upload command...")
+        logging.info("Выполняем команду загрузки...")
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        logging.info("Upload command executed.")
         stdout, stderr = process.communicate()
 
-        logging.info(f"Stdout: {stdout.decode()}")
-        logging.info(f"Stderr: {stderr.decode()}")
+        logging.info(f"Stdout: {stdout.decode().strip()}")
+        if stderr:
+            logging.error(f"Stderr: {stderr.decode().strip()}")
 
         if stderr:
-            logging.error(f"Dropbox upload failed.")
+            logging.error(f"Dropbox upload failed")
             return False
         else:
-            logging.info(f"Dropbox upload successful.")
+            logging.info(f"Dropbox upload completed successfully")
             return True
 
     except Exception as e:
-        logging.error(f"Error uploading to Dropbox: {e}. Access token may be invalid.")
+        logging.error(f"Error uploading to Dropbox: {e}")
         return False
 
 def manual_upload(file_path):

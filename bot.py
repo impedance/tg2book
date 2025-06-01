@@ -1,6 +1,12 @@
 import os
 import dropbox_module
 import logging
+
+class HTTPRequestFilter(logging.Filter):
+    def filter(self, record):
+        # Фильтруем все HTTP запросы к Telegram API
+        return "HTTP Request:" not in record.getMessage()
+
 logging.basicConfig(
     filename='bot.log',
     filemode='w',
@@ -8,6 +14,14 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 logger = logging.getLogger(__name__)
+
+# Применяем фильтр к различным логгерам, которые могут генерировать HTTP логи
+http_filter = HTTPRequestFilter()
+logger.addFilter(http_filter)
+logging.getLogger('httpx').addFilter(http_filter)
+logging.getLogger('urllib3').addFilter(http_filter)
+logging.getLogger('telegram').addFilter(http_filter)
+logging.getLogger().addFilter(http_filter)  # Корневой логгер
 from telegram import Update
 
 logger.setLevel(logging.DEBUG)
@@ -139,25 +153,17 @@ class TelegramToEpub:
             )
             return
 
-        logger.info(f"Начало обработки сообщения от пользователя: {message.chat.id}")
-        
-        # Log debug info but don't send to user
-        logger.info(f"Message ID: {message.message_id}")
-        logger.info(f"Text: {message.text or 'None'}")
-        logger.info(f"Caption: {message.caption or 'None'}")
+        logger.info(f"Обработка сообщения от пользователя: {message.chat.id}")
 
         if hasattr(message, 'forward_origin') and message.forward_origin:
-            logger.info(f"Is Forwarded: True, Type: {message.forward_origin.type}")
             if message.forward_origin.type == "user" and message.forward_origin.sender_user:
-                logger.info(f"Forwarded from User: {message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username}")
+                logger.info(f"Переслано от пользователя: {message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username}")
             elif message.forward_origin.type == "chat" and message.forward_origin.sender_chat:
-                logger.info(f"Forwarded from Chat: {message.forward_origin.sender_chat.title}")
+                logger.info(f"Переслано из чата: {message.forward_origin.sender_chat.title}")
             elif message.forward_origin.type == "channel" and message.forward_origin.sender_chat:
-                logger.info(f"Forwarded from Channel: {message.forward_origin.sender_chat.title}")
+                logger.info(f"Переслано из канала: {message.forward_origin.sender_chat.title}")
             elif message.forward_origin.type == "hidden_user":
-                logger.info(f"Forwarded from: Anonymous User")
-        else:
-            pass
+                logger.info(f"Переслано от анонимного пользователя")
         
         # Optionally send a brief processing message
         processing_msg = await message.reply_text("📚 Создаю EPUB файл...")
@@ -172,55 +178,47 @@ class TelegramToEpub:
                     forwarded_from = message.forward_origin.sender_chat.title
                 elif message.forward_origin.type == "hidden_user":
                     forwarded_from = "Anonymous User"
-
-                logger.info(f"Тип forward_origin: {message.forward_origin.type}")
-                if message.forward_origin.type == "user":
-                    logger.info(f"sender_user: {message.forward_origin.sender_user}")
-                elif message.forward_origin.type in ["chat", "channel"]:
-                    logger.info(f"sender_chat: {message.forward_origin.sender_chat}")
-
-                logger.info(f"Сообщение переслано от: {forwarded_from}")
             else:
                 forwarded_from = "Unknown"
 
             # Create EPUB
-            logger.info("Создание EPUB файла...")
             epub_path = self.create_epub(message, forwarded_from)
-            logger.info(f"EPUB файл создан: {epub_path}")
-            if os.path.exists(epub_path):
-                logger.info(f"Файл существует по пути: {epub_path}")
-            else:
-                logger.error(f"Файл не существует по пути: {epub_path}")
+            
+            if not os.path.exists(epub_path):
+                logger.error(f"Файл не был создан: {epub_path}")
+                await processing_msg.delete()
+                await message.reply_text("❌ Ошибка создания файла")
+                return
 
             # Send EPUB file
-            logger.info("Отправка EPUB файла пользователю...")
             try:
                 # Delete the processing message
                 await processing_msg.delete()
 
-                logger.info(f"Opening EPUB file: {epub_path}")
                 with open(epub_path, 'rb') as epub_file:
-                    logger.info("EPUB file opened successfully.")
                     await message.reply_document(
                         document=epub_file,
                         filename=f"message.epub",
                         caption="📖 Ваш EPUB файл готов!"
                     )
-                logger.info("EPUB файл успешно отправлен.")
+                logger.info("EPUB файл отправлен")
             except Exception as e:
                 logger.error(f"Ошибка при отправке EPUB файла: {e}")
                 await message.reply_text("❌ Извините, произошла ошибка при отправке файла.")
 
             # Upload to Dropbox
-            logger.info("Uploading EPUB file to Dropbox...")
+            logger.info(f"Инициируем загрузку в Dropbox: {epub_path}")
             try:
-                dropbox_module.upload_to_dropbox(epub_path)
-                logger.info("EPUB file upload to Dropbox initiated.")
+                success = dropbox_module.upload_to_dropbox(epub_path)
+                if success:
+                    logger.info("Загрузка в Dropbox завершена успешно")
+                else:
+                    logger.error("Загрузка в Dropbox не удалась")
             except Exception as e:
-                logger.error(f"Error initiating Dropbox upload: {e}")
+                logger.error(f"Ошибка загрузки в Dropbox: {e}")
 
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            logger.error(f"Ошибка обработки сообщения: {e}")
             try:
                 await processing_msg.delete()
             except:
