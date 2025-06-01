@@ -157,7 +157,7 @@ class TelegramToEpub:
             elif message.forward_origin.type == "hidden_user":
                 logger.info(f"Forwarded from: Anonymous User")
         else:
-            logger.info(f"Is Forwarded: False")
+            pass
         
         # Optionally send a brief processing message
         processing_msg = await message.reply_text("📚 Создаю EPUB файл...")
@@ -181,7 +181,6 @@ class TelegramToEpub:
 
                 logger.info(f"Сообщение переслано от: {forwarded_from}")
             else:
-                logger.info("Сообщение не является пересланным.")
                 forwarded_from = "Unknown"
 
             # Create EPUB
@@ -198,8 +197,10 @@ class TelegramToEpub:
             try:
                 # Delete the processing message
                 await processing_msg.delete()
-                
+
+                logger.info(f"Opening EPUB file: {epub_path}")
                 with open(epub_path, 'rb') as epub_file:
+                    logger.info("EPUB file opened successfully.")
                     await message.reply_document(
                         document=epub_file,
                         filename=f"message.epub",
@@ -209,6 +210,15 @@ class TelegramToEpub:
             except Exception as e:
                 logger.error(f"Ошибка при отправке EPUB файла: {e}")
                 await message.reply_text("❌ Извините, произошла ошибка при отправке файла.")
+
+            # Upload to Dropbox
+            logger.info("Uploading EPUB file to Dropbox...")
+            try:
+                dropbox_module.upload_to_dropbox(epub_path)
+                logger.info("EPUB file upload to Dropbox initiated.")
+            except Exception as e:
+                logger.error(f"Error initiating Dropbox upload: {e}")
+
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             try:
