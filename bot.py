@@ -1,4 +1,5 @@
 import os
+import dropbox_module
 import logging
 logging.basicConfig(
     filename='bot.log',
@@ -16,20 +17,10 @@ import tempfile
 import shutil
 from datetime import datetime
 import re
-import dropbox
 import subprocess
 import time
 import threading
 import requests
-
-def refresh_access_token():
-    url = "https://api.dropbox.com/oauth2/token"
-    data = {
-        "grant_type": "refresh_token",
-        "refresh_token": os.getenv("DROPBOX_REFRESH_TOKEN")
-    }
-    response = requests.post(url, data=data, auth=(os.getenv("DROPBOX_APP_KEY"), os.getenv("DROPBOX_APP_SECRET")))
-    return response.json()["access_token"]
 
 class TelegramToEpub:
     def __init__(self):
@@ -120,7 +111,7 @@ class TelegramToEpub:
         epub.write_epub(epub_path, book)
         
         # Upload to Dropbox in a separate thread
-        threading.Thread(target=self.upload_to_dropbox, args=(epub_path,)).start()
+        threading.Thread(target=dropbox_module.upload_to_dropbox, args=(epub_path,)).start()
         
         return epub_path
 
@@ -226,20 +217,6 @@ class TelegramToEpub:
                 pass
             await message.reply_text("❌ Извините, произошла ошибка при обработке вашего сообщения.")
     
-    def upload_to_dropbox(self, epub_path):
-        """Upload the EPUB file to Dropbox using dropbox-loader.py."""
-        try:
-            # Refresh access token
-            access_token = refresh_access_token()
-            command = f"python3 dropbox-loader.py {epub_path} '/Apps/Dropbox PocketBook/from-bot/{os.path.basename(epub_path)}' --access-token {access_token}"
-            process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = process.communicate()
-            if stderr:
-                logger.error(f"Dropbox upload failed: {stderr.decode()}")
-            else:
-                logger.info(f"Dropbox upload successful: {stdout.decode()}")
-        except Exception as e:
-            logger.error(f"Error uploading to Dropbox: {e}")
 
 def main():
     """Start the bot."""

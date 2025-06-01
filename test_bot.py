@@ -1,4 +1,5 @@
 import pytest
+from dropbox_module import upload_to_dropbox
 import os
 import tempfile
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -145,7 +146,7 @@ class TestTelegramToEpub:
     @patch('bot.requests.post')
     def test_refresh_access_token(self, mock_post):
         """Test Dropbox access token refresh."""
-        from bot import refresh_access_token
+        from dropbox_module import refresh_access_token
         
         mock_response = MagicMock()
         mock_response.json.return_value = {"access_token": "new_test_token"}
@@ -239,16 +240,16 @@ class TestTelegramToEpub:
             assert error_found
 
     # Test Dropbox upload
-    @patch('bot.subprocess.Popen')
-    @patch('bot.refresh_access_token')
-    def test_upload_to_dropbox(self, mock_refresh_token, mock_popen, converter):
+    @patch('dropbox_module.subprocess.Popen')
+    @patch('dropbox_module.refresh_access_token')
+    def test_upload_to_dropbox(self, mock_refresh_token, mock_popen):
         """Test Dropbox upload functionality."""
         mock_refresh_token.return_value = "test_token"
         mock_process = MagicMock()
         mock_process.communicate.return_value = (b"Success", b"")
         mock_popen.return_value = mock_process
         
-        converter.upload_to_dropbox("/test/file.epub")
+        upload_to_dropbox("/test/file.epub")
         
         mock_refresh_token.assert_called_once()
         mock_popen.assert_called_once()
