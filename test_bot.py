@@ -137,18 +137,19 @@ class TestTelegramToEpub:
         assert epub_path.endswith('.epub')
         mock_thread.assert_called_once()
 
-    # Test access token refresh
+    # Test access token refresh - ИСПРАВЛЕНО
     @patch.dict(os.environ, {
         'DROPBOX_REFRESH_TOKEN': 'test_refresh_token',
         'DROPBOX_APP_KEY': 'test_app_key',
         'DROPBOX_APP_SECRET': 'test_app_secret'
     })
-    @patch('bot.requests.post')
+    @patch('dropbox_module.requests.post')  # Исправлено: правильный путь к модулю
     def test_refresh_access_token(self, mock_post):
         """Test Dropbox access token refresh."""
         from dropbox_module import refresh_access_token
         
         mock_response = MagicMock()
+        mock_response.status_code = 200  # ДОБАВЛЕНО: устанавливаем успешный статус
         mock_response.json.return_value = {"access_token": "new_test_token"}
         mock_post.return_value = mock_response
         
@@ -239,20 +240,26 @@ class TestTelegramToEpub:
                     break
             assert error_found
 
-    # Test Dropbox upload
+    # Test Dropbox upload - ИСПРАВЛЕНО
+    @patch('dropbox_module.os.path.exists')  # Мокаем проверку существования файла
+    @patch('dropbox_module.os.path.getsize')  # Мокаем получение размера файла
     @patch('dropbox_module.subprocess.Popen')
     @patch('dropbox_module.refresh_access_token')
-    def test_upload_to_dropbox(self, mock_refresh_token, mock_popen):
+    def test_upload_to_dropbox(self, mock_refresh_token, mock_popen, mock_getsize, mock_exists):
         """Test Dropbox upload functionality."""
+        # Настраиваем моки
+        mock_exists.return_value = True  # Файл существует
+        mock_getsize.return_value = 1024  # Размер файла
         mock_refresh_token.return_value = "test_token"
         mock_process = MagicMock()
         mock_process.communicate.return_value = (b"Success", b"")
         mock_popen.return_value = mock_process
         
-        upload_to_dropbox("/test/file.epub")
+        result = upload_to_dropbox("/test/file.epub")
         
         mock_refresh_token.assert_called_once()
         mock_popen.assert_called_once()
+        assert result is True  # Проверяем успешный результат
 
     # Test different forwarded message types
     @pytest.mark.asyncio
