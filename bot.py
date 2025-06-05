@@ -35,6 +35,7 @@ import subprocess
 import time
 import threading
 import requests
+from epub_functions import create_epub
 
 class TelegramToEpub:
     def __init__(self):
@@ -82,52 +83,6 @@ class TelegramToEpub:
             formatted_paragraphs.append(f'<p>{para}</p>')
         return '\n'.join(formatted_paragraphs)
 
-    def create_epub(self, message, forwarded_from=None) -> str:
-        """Create an EPUB file from the message text content."""
-        # Get text content from message.text or message.caption
-        text_content = self.get_message_text(message)
-        
-        # Generate title from date and sender
-        date_str = message.date.strftime("%Y-%m-%d %H:%M")
-        sender = forwarded_from or "Unknown"
-        title = f"Telegram Message - {date_str} - {sender}"
-        # Clean title for filename
-        clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
-        
-        # Prepare content from message text - without title header
-        content = f"""
-        <div class=\"message-content\">
-            {self.format_message(text_content)}
-        </div>
-        """
-        
-        # Create EPUB
-        book = epub.EpubBook()
-        book.set_title(title)
-        book.set_language('ru')
-        
-        # Add content
-        c1 = epub.EpubHtml(title='Content', file_name='content.xhtml', lang='ru')
-        c1.content = f'<html><body>{content}</body></html>'
-        book.add_item(c1)
-        
-        # Add navigation (required by EPUB standard but not in spine)
-        book.add_item(epub.EpubNcx())
-        book.add_item(epub.EpubNav())
-        
-        # Create spine - start directly with content, no navigation page
-        book.spine = [c1]
-        
-        # Save the EPUB file
-        os.makedirs("docs", exist_ok=True)
-        date_str = message.date.strftime("%m-%d-%y_%H-%M-%S")
-        epub_path = os.path.join("docs", f'msg-{date_str}.epub')
-        epub.write_epub(epub_path, book)
-        
-        # Upload to Dropbox in a separate thread
-        threading.Thread(target=dropbox_module.upload_to_dropbox, args=(epub_path,)).start()
-        
-        return epub_path
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages."""
@@ -181,8 +136,13 @@ class TelegramToEpub:
             else:
                 forwarded_from = "Unknown"
 
+            # Extract title and content from message
+            title = message.text or message.caption or "Untitled"
+            content = self.format_message(title)
+
             # Create EPUB
-            epub_path = self.create_epub(message, forwarded_from)
+            with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp_file:
+                epub_path = create_epub(title, forwarded_from, content, tmp_file.name)
             
             if not os.path.exists(epub_path):
                 logger.error(f"Файл не был создан: {epub_path}")
@@ -221,7 +181,8 @@ class TelegramToEpub:
             logger.error(f"Ошибка обработки сообщения: {e}")
             try:
                 await processing_msg.delete()
-            except:
+            except Exception:
+                logger.error("Не удалось удалить сообщение о обработке")
                 pass
             await message.reply_text("❌ Извините, произошла ошибка при обработке вашего сообщения.")
     

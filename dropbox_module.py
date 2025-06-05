@@ -4,11 +4,10 @@ import subprocess
 import logging
 import requests
 import argparse
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-import re
 
 def redact_access_token(text):
     """Redacts the access token from the given text."""
@@ -85,12 +84,15 @@ def upload_to_dropbox(file_path):
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = process.communicate()
 
-        logging.info(f"Stdout: {stdout.decode().strip()}")
-        if stderr:
-            logging.error(f"Stderr: {stderr.decode().strip()}")
+        # Decode bytes to string if needed
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode()
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode()
 
+        logging.info(f"Stdout: {stdout.strip()}")
         if stderr:
-            logging.error(f"Dropbox upload failed")
+            logging.error(f"Stderr: {stderr.strip()}")
             return False
         else:
             logging.info(f"Dropbox upload completed successfully")
