@@ -14,6 +14,7 @@ A Telegram bot that converts Telegram posts into EPUB format for e-readers.
 
 - Python 3.x
 - Telegram Bot API token (obtain from @BotFather)
+- Dropbox App credentials (for file storage)
 - Required Python packages (see requirements.txt)
 
 ## Installation
@@ -29,16 +30,34 @@ cd tg2book
 pip install -r requirements.txt
 ```
 
-3. Set up environment variables:
+3. Set up environment variables in `.env` file:
 ```bash
-export TELEGRAM_BOT_TOKEN="your_bot_token_here"
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+DROPBOX_APP_KEY=your_dropbox_app_key
+DROPBOX_APP_SECRET=your_dropbox_app_secret
+DROPBOX_REFRESH_TOKEN=your_dropbox_refresh_token
 ```
+
+### Getting Dropbox Credentials
+
+1. Go to https://www.dropbox.com/developers/apps
+2. Create a new app or use existing one
+3. Copy App Key and App Secret to `.env` file
+4. To get refresh token:
+   - Open: `https://www.dropbox.com/oauth2/authorize?client_id=YOUR_APP_KEY&response_type=code&token_access_type=offline`
+   - Authorize the app and copy the authorization code from redirect URL
+   - Run: `python3 exchange_code.py YOUR_AUTHORIZATION_CODE`
+   - The script will automatically update `.env` with the refresh token
 
 ## Usage
 
 1. Start the bot:
 ```bash
-python bot.py
+./start.sh
+```
+or
+```bash
+python3 bot.py
 ```
 
 2. In Telegram:
