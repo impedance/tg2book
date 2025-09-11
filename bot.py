@@ -1,6 +1,7 @@
 import os
 import dropbox_module
 import logging
+import re
 
 class HTTPRequestFilter(logging.Filter):
     def filter(self, record):
@@ -84,6 +85,30 @@ class TelegramToEpub:
         return '\n'.join(formatted_paragraphs)
 
 
+    def sanitize_filename(self, title, max_words=4):
+        """Create a safe filename from post title (limited to max_words)"""
+        if not title or title == "Untitled":
+            return "message"
+        
+        # Take first line or first sentence as filename
+        clean_title = title.split('\n')[0].strip()
+        if not clean_title:
+            clean_title = title.strip()
+        
+        # Remove or replace unsafe characters
+        clean_title = re.sub(r'[^\w\s\-_а-яё]', '', clean_title, flags=re.IGNORECASE)
+        clean_title = re.sub(r'\s+', ' ', clean_title.strip())
+        
+        # Limit to max_words
+        words = clean_title.split()
+        if len(words) > max_words:
+            words = words[:max_words]
+        
+        # Join with underscores
+        clean_title = '_'.join(words)
+        
+        return clean_title if clean_title else "message"
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages."""
         message = update.message
@@ -139,6 +164,9 @@ class TelegramToEpub:
             # Extract title and content from message
             title = message.text or message.caption or "Untitled"
             content = self.format_message(title)
+            
+            # Generate clean filename from title
+            safe_filename = self.sanitize_filename(title)
 
             # Create EPUB
             with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp_file:
@@ -158,7 +186,7 @@ class TelegramToEpub:
                 with open(epub_path, 'rb') as epub_file:
                     await message.reply_document(
                         document=epub_file,
-                        filename=f"message.epub",
+                        filename=f"{safe_filename}.epub",
                         caption="📖 Ваш EPUB файл готов!"
                     )
                 logger.info("EPUB файл отправлен")
@@ -169,7 +197,8 @@ class TelegramToEpub:
             # Upload to Dropbox
             logger.info(f"Инициируем загрузку в Dropbox: {epub_path}")
             try:
-                success = dropbox_module.upload_to_dropbox(epub_path)
+                dropbox_filename = f"{safe_filename}.epub"
+                success = dropbox_module.upload_to_dropbox(epub_path, dropbox_filename)
                 if success:
                     logger.info("Загрузка в Dropbox завершена успешно")
                 else:

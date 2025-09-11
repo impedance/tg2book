@@ -32,7 +32,7 @@ def refresh_access_token():
         logging.error(f"Failed to refresh access token: {response.status_code}")
         return None
 
-def upload_to_dropbox(file_path):
+def upload_to_dropbox(file_path, custom_filename=None):
     """Uploads a file to Dropbox."""
     try:
         logging.info(f"Начинаем загрузку файла: {file_path}")
@@ -56,7 +56,7 @@ def upload_to_dropbox(file_path):
         logging.info("Access token получен успешно")
 
         # Формируем путь в Dropbox (добавляем имя файла к папке)
-        filename = os.path.basename(file_path)
+        filename = custom_filename if custom_filename else os.path.basename(file_path)
         dropbox_folder = "/Apps/Dropbox PocketBook/from-bot/"
         dropbox_full_path = dropbox_folder + filename
         
@@ -91,7 +91,14 @@ def upload_to_dropbox(file_path):
             stderr = stderr.decode()
 
         logging.info(f"Stdout: {stdout.strip()}")
-        if stderr:
+        
+        # Check if upload was actually successful by looking at stdout
+        if "Успешно завершено!" in stdout or "Загрузка завершена успешно!" in stdout:
+            logging.info(f"Dropbox upload completed successfully")
+            if stderr:
+                logging.warning(f"Stderr (warnings): {stderr.strip()}")
+            return True
+        elif stderr:
             logging.error(f"Stderr: {stderr.strip()}")
             return False
         else:

@@ -55,3 +55,4 @@ htmlcov/
 *.gif
 *.mp4
 .env
+.venv/
