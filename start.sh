@@ -1,20 +1,28 @@
 #!/bin/bash
 
-# Load environment variables from .env file
-set -o allexport
-source .env
-set +o allexport
+set -euo pipefail
 
-# Log the start time
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+VENV_DIR=".venv"
+if [ ! -d "$VENV_DIR" ]; then
+  echo "$(date) - Creating virtual environment in $VENV_DIR"
+  python3 -m venv "$VENV_DIR"
+fi
+
+# Activate the virtual environment so dependencies are already available
+source "$VENV_DIR/bin/activate"
+
+if [ -f .env ]; then
+  set -o allexport
+  source .env
+  set +o allexport
+fi
+
 echo "$(date) - Starting the bot..."
-
-# Load environment variables from .env file
-set -o allexport
-source .env
-set +o allexport
 
 # Run the bot and log the output
 python3 bot.py 2>&1 | tee bot.log
 
-# Log the exit time
 echo "$(date) - Bot exited."

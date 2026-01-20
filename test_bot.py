@@ -71,13 +71,17 @@ class TestTelegramToEpub:
         update.message.chat.id = 12345
         update.message.text = None
         update.message.caption = None
+        update.message.document = None
         update.message.date = datetime.now()
         return update
 
     @pytest.fixture
     def mock_context(self):
         """Create a mock Context object."""
-        return MagicMock()
+        ctx = MagicMock()
+        ctx.bot = MagicMock()
+        ctx.bot.get_file = AsyncMock()
+        return ctx
     
     @pytest.fixture
     def mock_forwarded_message(self, mock_update):
@@ -123,6 +127,54 @@ class TestTelegramToEpub:
         assert '<p>' in formatted
         assert '<br>' in formatted
         assert '<u>file.md</u>' in formatted
+
+    @pytest.mark.asyncio
+    async def test_handle_epub_document(self, converter, mock_update, mock_context):
+        """Ensure direct EPUB documents are forwarded without conversion."""
+        processing_msg = MagicMock()
+        processing_msg.delete = AsyncMock()
+        mock_update.message.reply_text = AsyncMock(return_value=processing_msg)
+
+        document = MagicMock()
+        document.mime_type = "application/epub+zip"
+        document.file_name = "My Book.epub"
+        document.file_id = "file-id"
+        mock_update.message.document = document
+
+        file_mock = MagicMock()
+        file_mock.download_to_drive = AsyncMock()
+        mock_context.bot.get_file.return_value = file_mock
+
+        with patch('bot.dropbox_module.upload_to_dropbox', return_value=True) as mock_upload, \
+             patch('bot.create_epub') as mock_create:
+            await converter.handle_message(mock_update, mock_context)
+
+        mock_context.bot.get_file.assert_awaited_once_with("file-id")
+        file_mock.download_to_drive.assert_awaited()
+        mock_update.message.reply_document.assert_awaited_once()
+        args, kwargs = mock_update.message.reply_document.call_args
+        assert kwargs["filename"] == "My_Book.epub"
+        processing_msg.delete.assert_awaited_once()
+        mock_upload.assert_called_once()
+        assert mock_upload.call_args[0][1] == "My_Book.epub"
+        mock_create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_non_epub_document(self, converter, mock_update, mock_context):
+        """Verify non-EPUB documents are rejected."""
+        document = MagicMock()
+        document.mime_type = "application/pdf"
+        document.file_name = "report.pdf"
+        document.file_id = "file-id"
+        mock_update.message.document = document
+
+        await converter.handle_message(mock_update, mock_context)
+
+        mock_update.message.reply_text.assert_awaited_once()
+        reply_text = mock_update.message.reply_text.call_args[0][0]
+        assert "только EPUB" in reply_text
+        mock_context.bot.get_file.assert_not_called()
+        mock_update.message.reply_document.assert_not_called()
 
     # Test EPUB creation
     @patch('bot.os.makedirs')
@@ -347,7 +399,8 @@ def test_main_function(mock_application):
     mock_app_instance = MagicMock()
     mock_application.builder.return_value.token.return_value.build.return_value = mock_app_instance
     
-    main()
+    with patch('bot.CommandHandler', new=MagicMock()), patch('bot.MessageHandler', new=MagicMock()):
+        main()
     
     # Should create application and add handlers
     mock_app_instance.add_handler.assert_called()
