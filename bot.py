@@ -1,7 +1,15 @@
-import os
-import dropbox_module
+import asyncio
 import logging
+import os
 import re
+import shutil
+import sys
+import tempfile
+
+import dropbox_module
+from epub_functions import create_epub
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 class HTTPRequestFilter(logging.Filter):
     def filter(self, record):
@@ -9,12 +17,12 @@ class HTTPRequestFilter(logging.Filter):
         return "HTTP Request:" not in record.getMessage()
 
 logging.basicConfig(
-    filename='bot.log',
-    filemode='w',
+    stream=sys.stdout,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.DEBUG
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 # Применяем фильтр к различным логгерам, которые могут генерировать HTTP логи
 http_filter = HTTPRequestFilter()
@@ -23,27 +31,23 @@ logging.getLogger('httpx').addFilter(http_filter)
 logging.getLogger('urllib3').addFilter(http_filter)
 logging.getLogger('telegram').addFilter(http_filter)
 logging.getLogger().addFilter(http_filter)  # Корневой логгер
-from telegram import Update
-
-logger.setLevel(logging.DEBUG)
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from ebooklib import epub
-import tempfile
-import shutil
-from datetime import datetime
-import re
-import subprocess
-import time
-import threading
-import requests
-from epub_functions import create_epub
 
 class TelegramToEpub:
     def __init__(self):
         self.temp_dir = tempfile.mkdtemp()
+        self.processing_semaphore = asyncio.Semaphore(1)
 
     def __del__(self):
         shutil.rmtree(self.temp_dir)
+
+    def extract_title(self, text: str) -> str:
+        """Берёт заголовок как первый абзац (до пустой строки)."""
+        text = (text or "").strip()
+        if not text:
+            return "Untitled"
+        paragraphs = re.split(r"\n\s*\n", text, maxsplit=1)
+        title = (paragraphs[0] or "").strip()
+        return title or "Untitled"
 
     def get_message_text(self, message):
         """Get text content from message.text or message.caption"""
@@ -112,167 +116,168 @@ class TelegramToEpub:
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages."""
         message = update.message
-
-        # Handle direct EPUB documents
-        if message.document:
-            document = message.document
-            file_name = document.file_name or "document.epub"
-            is_epub = (document.mime_type == "application/epub+zip") or file_name.lower().endswith(".epub")
-
-            if not is_epub:
-                logger.info("Получен неподдерживаемый тип документа.")
-                await message.reply_text(
-                    "Сейчас поддерживаются только EPUB документы. Пожалуйста, отправьте файл с расширением .epub."
-                )
-                return
-
-            logger.info("Обработка загруженного EPUB документа.")
-            processing_msg = await message.reply_text("📚 Получен EPUB файл, подготавливаю отправку...")
-            temp_path = None
-
-            try:
-                telegram_file = await context.bot.get_file(document.file_id)
-
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".epub") as tmp_file:
-                    temp_path = tmp_file.name
-
-                await telegram_file.download_to_drive(custom_path=temp_path)
-
-                base_name = os.path.splitext(file_name)[0]
-                safe_filename = self.sanitize_filename(base_name) or "document"
-                send_filename = f"{safe_filename}.epub"
-
-                await processing_msg.delete()
-                with open(temp_path, "rb") as epub_file:
-                    await message.reply_document(
-                        document=epub_file,
-                        filename=send_filename,
-                        caption="📖 Ваш EPUB файл готов!"
-                    )
-                logger.info("EPUB документ отправлен пользователю.")
-
-                try:
-                    dropbox_filename = send_filename
-                    dropbox_module.upload_to_dropbox(temp_path, dropbox_filename)
-                    logger.info("EPUB документ загружен в Dropbox.")
-                except Exception as e:
-                    logger.error(f"Ошибка при загрузке EPUB в Dropbox: {e}")
-            except Exception as e:
-                logger.error(f"Ошибка обработки входящего EPUB документа: {e}")
-                try:
-                    await processing_msg.delete()
-                except Exception:
-                    logger.error("Не удалось удалить сообщение о обработке (EPUB документ).")
-                await message.reply_text("❌ Извините, произошла ошибка при обработке файла EPUB.")
-            finally:
-                if temp_path and os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except Exception:
-                        logger.error("Не удалось удалить временный EPUB файл.")
+        if not message:
             return
 
-        # Get text content from message.text or message.caption
         text_content = self.get_message_text(message)
+        forward_origin = getattr(message, "forward_origin", None)
 
-        # Check if message contains text content
-        if hasattr(message, 'forward_origin') and message.forward_origin:
-            # Handle forwarded messages - check all supported types including channel
-            if message.forward_origin.type in ["user", "chat", "hidden_user", "channel"]:
+        if not message.document:
+            if forward_origin and forward_origin.type in ["user", "chat", "hidden_user", "channel"]:
                 if not text_content:
                     logger.info("Forwarded message does not contain text")
                     await message.reply_text(
                         "Пересланное сообщение не содержит текста. Пожалуйста, перешлите сообщение с текстом."
                     )
                     return
-        elif not text_content:
-            logger.info("Сообщение не содержит текста.")
+            elif not text_content:
+                logger.info("Сообщение не содержит текста.")
+                await message.reply_text(
+                    "Сообщение не содержит текста. Пожалуйста, перешлите сообщение с текстом."
+                )
+                return
+
+        async with self.processing_semaphore:
+            if message.document:
+                await self._process_uploaded_epub(message, context)
+                return
+
+            logger.info(f"Обработка сообщения от пользователя: {message.chat.id}")
+
+            if forward_origin:
+                if forward_origin.type == "user" and forward_origin.sender_user:
+                    logger.info(
+                        f"Переслано от пользователя: {forward_origin.sender_user.full_name or forward_origin.sender_user.username}"
+                    )
+                elif forward_origin.type == "chat" and forward_origin.sender_chat:
+                    logger.info(f"Переслано из чата: {forward_origin.sender_chat.title}")
+                elif forward_origin.type == "channel" and forward_origin.sender_chat:
+                    logger.info(f"Переслано из канала: {forward_origin.sender_chat.title}")
+                elif forward_origin.type == "hidden_user":
+                    logger.info("Переслано от анонимного пользователя")
+
+            processing_msg = await message.reply_text("📚 Создаю EPUB файл...")
+
+            try:
+                forwarded_from = "Unknown"
+                if forward_origin:
+                    if forward_origin.type == "user" and forward_origin.sender_user:
+                        forwarded_from = (
+                            forward_origin.sender_user.full_name
+                            or forward_origin.sender_user.username
+                        )
+                    elif forward_origin.type in ["chat", "channel"] and forward_origin.sender_chat:
+                        forwarded_from = forward_origin.sender_chat.title
+                    elif forward_origin.type == "hidden_user":
+                        forwarded_from = "Anonymous User"
+
+                full_text = text_content
+                title = self.extract_title(full_text)
+                content = self.format_message(full_text)
+                safe_filename = self.sanitize_filename(title)
+
+                with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp_file:
+                    epub_path = create_epub(title, forwarded_from, content, tmp_file.name)
+
+                if not os.path.exists(epub_path):
+                    logger.error(f"Файл не был создан: {epub_path}")
+                    await processing_msg.delete()
+                    await message.reply_text("❌ Ошибка создания файла")
+                    return
+
+                try:
+                    await processing_msg.delete()
+
+                    with open(epub_path, 'rb') as epub_file:
+                        await message.reply_document(
+                            document=epub_file,
+                            filename=f"{safe_filename}.epub",
+                            caption="📖 Ваш EPUB файл готов!"
+                        )
+                    logger.info("EPUB файл отправлен")
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке EPUB файла: {e}")
+                    await message.reply_text("❌ Извините, произошла ошибка при отправке файла.")
+
+                logger.info(f"Инициируем загрузку в Dropbox: {epub_path}")
+                try:
+                    dropbox_filename = f"{safe_filename}.epub"
+                    success = dropbox_module.upload_to_dropbox(epub_path, dropbox_filename)
+                    if success:
+                        logger.info("Загрузка в Dropbox завершена успешно")
+                    else:
+                        logger.error("Загрузка в Dropbox не удалась")
+                except Exception as e:
+                    logger.error(f"Ошибка загрузки в Dropbox: {e}")
+
+            except Exception as e:
+                logger.error(f"Ошибка обработки сообщения: {e}")
+                try:
+                    await processing_msg.delete()
+                except Exception:
+                    logger.error("Не удалось удалить сообщение о обработке")
+                await message.reply_text("❌ Извините, произошла ошибка при обработке вашего сообщения.")
+
+    async def _process_uploaded_epub(self, message, context):
+        """Process an uploaded EPUB document and forward it back with Dropbox sync."""
+        document = message.document
+        if not document:
+            return
+
+        file_name = document.file_name or "document.epub"
+        is_epub = (document.mime_type == "application/epub+zip") or file_name.lower().endswith(".epub")
+
+        if not is_epub:
+            logger.info("Получен неподдерживаемый тип документа.")
             await message.reply_text(
-                "Сообщение не содержит текста. Пожалуйста, перешлите сообщение с текстом."
+                "Сейчас поддерживаются только EPUB документы. Пожалуйста, отправьте файл с расширением .epub."
             )
             return
 
-        logger.info(f"Обработка сообщения от пользователя: {message.chat.id}")
-
-        if hasattr(message, 'forward_origin') and message.forward_origin:
-            if message.forward_origin.type == "user" and message.forward_origin.sender_user:
-                logger.info(f"Переслано от пользователя: {message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username}")
-            elif message.forward_origin.type == "chat" and message.forward_origin.sender_chat:
-                logger.info(f"Переслано из чата: {message.forward_origin.sender_chat.title}")
-            elif message.forward_origin.type == "channel" and message.forward_origin.sender_chat:
-                logger.info(f"Переслано из канала: {message.forward_origin.sender_chat.title}")
-            elif message.forward_origin.type == "hidden_user":
-                logger.info(f"Переслано от анонимного пользователя")
-        
-        # Optionally send a brief processing message
-        processing_msg = await message.reply_text("📚 Создаю EPUB файл...")
+        logger.info("Обработка загруженного EPUB документа.")
+        processing_msg = await message.reply_text("📚 Получен EPUB файл, подготавливаю отправку...")
+        temp_path = None
 
         try:
-            # Get sender info
-            forwarded_from = None
-            if hasattr(message, 'forward_origin') and message.forward_origin:
-                if message.forward_origin.type == "user" and message.forward_origin.sender_user:
-                    forwarded_from = message.forward_origin.sender_user.full_name or message.forward_origin.sender_user.username
-                elif message.forward_origin.type in ["chat", "channel"] and message.forward_origin.sender_chat:
-                    forwarded_from = message.forward_origin.sender_chat.title
-                elif message.forward_origin.type == "hidden_user":
-                    forwarded_from = "Anonymous User"
-            else:
-                forwarded_from = "Unknown"
+            telegram_file = await context.bot.get_file(document.file_id)
 
-            # Extract title and content from message
-            title = message.text or message.caption or "Untitled"
-            content = self.format_message(title)
-            
-            # Generate clean filename from title
-            safe_filename = self.sanitize_filename(title)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".epub") as tmp_file:
+                temp_path = tmp_file.name
 
-            # Create EPUB
-            with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp_file:
-                epub_path = create_epub(title, forwarded_from, content, tmp_file.name)
-            
-            if not os.path.exists(epub_path):
-                logger.error(f"Файл не был создан: {epub_path}")
-                await processing_msg.delete()
-                await message.reply_text("❌ Ошибка создания файла")
-                return
+            await telegram_file.download_to_drive(custom_path=temp_path)
 
-            # Send EPUB file
+            base_name = os.path.splitext(file_name)[0]
+            safe_filename = self.sanitize_filename(base_name) or "document"
+            send_filename = f"{safe_filename}.epub"
+
+            await processing_msg.delete()
+            with open(temp_path, "rb") as epub_file:
+                await message.reply_document(
+                    document=epub_file,
+                    filename=send_filename,
+                    caption="📖 Ваш EPUB файл готов!"
+                )
+            logger.info("EPUB документ отправлен пользователю.")
+
             try:
-                # Delete the processing message
-                await processing_msg.delete()
-
-                with open(epub_path, 'rb') as epub_file:
-                    await message.reply_document(
-                        document=epub_file,
-                        filename=f"{safe_filename}.epub",
-                        caption="📖 Ваш EPUB файл готов!"
-                    )
-                logger.info("EPUB файл отправлен")
+                dropbox_filename = send_filename
+                dropbox_module.upload_to_dropbox(temp_path, dropbox_filename)
+                logger.info("EPUB документ загружен в Dropbox.")
             except Exception as e:
-                logger.error(f"Ошибка при отправке EPUB файла: {e}")
-                await message.reply_text("❌ Извините, произошла ошибка при отправке файла.")
-
-            # Upload to Dropbox
-            logger.info(f"Инициируем загрузку в Dropbox: {epub_path}")
-            try:
-                dropbox_filename = f"{safe_filename}.epub"
-                success = dropbox_module.upload_to_dropbox(epub_path, dropbox_filename)
-                if success:
-                    logger.info("Загрузка в Dropbox завершена успешно")
-                else:
-                    logger.error("Загрузка в Dropbox не удалась")
-            except Exception as e:
-                logger.error(f"Ошибка загрузки в Dropbox: {e}")
-
+                logger.error(f"Ошибка при загрузке EPUB в Dropbox: {e}")
         except Exception as e:
-            logger.error(f"Ошибка обработки сообщения: {e}")
+            logger.error(f"Ошибка обработки входящего EPUB документа: {e}")
             try:
                 await processing_msg.delete()
             except Exception:
-                logger.error("Не удалось удалить сообщение о обработке")
-                pass
-            await message.reply_text("❌ Извините, произошла ошибка при обработке вашего сообщения.")
+                logger.error("Не удалось удалить сообщение о обработке (EPUB документ).")
+            await message.reply_text("❌ Извините, произошла ошибка при обработке файла EPUB.")
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    logger.error("Не удалось удалить временный EPUB файл.")
     
 
 def main():

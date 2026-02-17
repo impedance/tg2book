@@ -118,6 +118,10 @@ class TestTelegramToEpub:
         message.caption = None
         assert converter.get_message_text(message) == ""
 
+    def test_extract_title_first_paragraph(self, converter):
+        text = "Первый абзац\nсо второй строкой\n\nВторой абзац"
+        assert converter.extract_title(text) == "Первый абзац\nсо второй строкой"
+
     # Test text formatting
     def test_format_message(self, converter):
         """Test message formatting."""
@@ -187,9 +191,13 @@ class TestTelegramToEpub:
         content = "Test content"
         output_path = "/tmp/test.epub"
 
-        epub_path = create_epub("Test Title", "Test Author", content, output_path)
+        book_mock = MagicMock()
+        with patch("epub_functions.epub.EpubBook", return_value=book_mock), \
+             patch("epub_functions._render_text_cover_png", return_value=b"fake_png"):
+            epub_path = create_epub("Test Title", "Test Author", content, output_path)
         
         assert mock_epub.write_epub.called
+        assert book_mock.set_cover.called
         assert epub_path == output_path
 
     # Test access token refresh
@@ -299,6 +307,29 @@ class TestTelegramToEpub:
 
                         # Should create EPUB
                         mock_forwarded_message.message.reply_document.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_message_title_is_first_paragraph(self, converter, mock_update, mock_context):
+        """Title should be taken only from the first paragraph."""
+        mock_update.message.forward_origin = MagicMock()
+        mock_update.message.forward_origin.type = "user"
+        mock_update.message.forward_origin.sender_user = MagicMock()
+        mock_update.message.forward_origin.sender_user.full_name = "Test User"
+        mock_update.message.text = "Заголовок\n\nТело поста"
+
+        processing_msg = MagicMock()
+        processing_msg.delete = AsyncMock()
+        mock_update.message.reply_text = AsyncMock(return_value=processing_msg)
+
+        with patch('bot.dropbox_module.upload_to_dropbox', return_value=True), \
+             patch('bot.create_epub', return_value='/tmp/test.epub') as mock_create, \
+             patch('builtins.open', MagicMock()), \
+             patch('os.path.exists', return_value=True):
+            await converter.handle_message(mock_update, mock_context)
+
+        args, _kwargs = mock_create.call_args
+        assert args[0] == "Заголовок"
+        assert "Тело поста" in args[2]
 
     # Test message handling - with caption instead of text
     @pytest.mark.asyncio

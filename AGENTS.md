@@ -17,3 +17,6 @@ Pytest drives coverage; add new cases in modules named `test_*.py` and functions
 
 ## Commit & Pull Request Guidelines
 Commits are short, imperative phrases (e.g., `update naming`, `fix test`). Scope each commit to a logical change and include relevant tests. Pull requests should describe the bot behavior change, list test evidence (commands run or screenshots of EPUB output), and reference any product briefs in `memory-bank/`. Flag security-sensitive updates (tokens, Dropbox flow) so reviewers can double-check configuration.
+
+## Communication Style
+- Отвечать на вопросы пользователя на русском (если не указано иное) и сохранять дружелюбный рабочий тон.

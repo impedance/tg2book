@@ -1,0 +1,10 @@
+
+services:
+  tg2book:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    init: true
+    mem_limit: 768m
+    mem_reservation: 512m
+    cpus: 0.75
