@@ -50,6 +50,10 @@ DROPBOX_REFRESH_TOKEN=your_dropbox_refresh_token
    - The script will automatically update `.env` with the refresh token
 
 ## Usage
+For local development with Docker:
+- `make run`: Restart container to apply code changes
+- `make test`: Run tests inside container
+- `make logs`: View logs
 
 1. Start the bot:
 ```bash

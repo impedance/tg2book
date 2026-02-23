@@ -7,7 +7,15 @@ Always review the knowledge base in `memory-bank/*.md` before acting on this gui
 Core bot logic lives in `bot.py`, delegating EPUB creation to `epub_functions.py` and Dropbox syncing to `dropbox_module.py`. Reusable scripts (`dropbox-loader.py`, `exchange_code.py`) support credential flow. Tests sit in `test_bot.py`, configs in `pytest.ini` and `requirements*.txt`, and operational notes under `memory-bank/`. The `start.sh` wrapper launches the bot with environment variables.
 
 ## Build, Test, and Development Commands
-Всегда работайте в локальном виртуальном окружении: `python -m venv .venv`, затем `source .venv/bin/activate`. После активации устанавливайте зависимости `pip install -r requirements.txt`. Запускайте бота через `./start.sh` или `python bot.py`, когда заданы `TELEGRAM_BOT_TOKEN` и Dropbox секреты. Для загрузки файлов в Dropbox используйте `python dropbox-loader.py <local_path>`. Логи смотрите командой `tail -f bot.log`.
+Всегда работайте в локальном виртуальном окружении: `python -m venv .venv`, затем `source .venv/bin/activate`. После активации устанавливайте зависимости `pip install -r requirements.txt`.
+
+Для запуска и разработки используйте `make`:
+- `make run`: Перезапустить контейнер (применит изменения в коде без пересборки).
+- `make test`: Запустить тесты внутри контейнера.
+- `make logs`: Смотреть логи.
+- `make build`: Пересобрать контейнер (если изменились зависимости).
+
+Запускайте бота через `./start.sh` или `python bot.py`, когда заданы `TELEGRAM_BOT_TOKEN` и Dropbox секреты. Для загрузки файлов в Dropbox используйте `python dropbox-loader.py <local_path>`. Логи смотрите командой `tail -f bot.log`.
 
 ## Coding Style & Naming Conventions
 Follow PEP 8: four-space indents, snake_case for functions, and CapWords for classes. Keep user-facing copy in Russian to match current responses. Prefer docstrings for public methods and concise logging with the shared `logger`. When touching filters or formatters, mirror existing naming such as `sanitize_filename` and reserve `create_*` for EPUB builders.

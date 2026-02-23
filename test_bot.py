@@ -132,6 +132,14 @@ class TestTelegramToEpub:
         assert '<br>' in formatted
         assert '<u>file.md</u>' in formatted
 
+    def test_strip_emojis(self, converter):
+        """Test emoji stripping."""
+        text = "Hello 🌍! 🗓️ Title 📖"
+        assert converter.strip_emojis(text) == "Hello ! Title"
+        
+        text_with_cyrillic = "Привет 👋! Как дела? 😊"
+        assert converter.strip_emojis(text_with_cyrillic) == "Привет ! Как дела?"
+
     @pytest.mark.asyncio
     async def test_handle_epub_document(self, converter, mock_update, mock_context):
         """Ensure direct EPUB documents are forwarded without conversion."""
@@ -158,6 +166,10 @@ class TestTelegramToEpub:
         mock_update.message.reply_document.assert_awaited_once()
         args, kwargs = mock_update.message.reply_document.call_args
         assert kwargs["filename"] == "My_Book.epub"
+        assert kwargs["parse_mode"] == "HTML"
+        # The caption now contains <b><a>My Book</a></b> if forwarded
+        assert "My Book" in kwargs["caption"]
+        assert "<b>" in kwargs["caption"]
         processing_msg.delete.assert_awaited_once()
         mock_upload.assert_called_once()
         assert mock_upload.call_args[0][1] == "My_Book.epub"
@@ -303,10 +315,20 @@ class TestTelegramToEpub:
                 with patch('builtins.open', MagicMock()):
                     # Patch os.path.exists to return True
                     with patch('os.path.exists', return_value=True):
-                        await converter.handle_message(mock_forwarded_message, mock_context)
-
-                        # Should create EPUB
-                        mock_forwarded_message.message.reply_document.assert_called_once()
+                        # Patch os.remove to avoid file not found error during cleanup
+                        with patch('os.remove'):
+                            await converter.handle_message(mock_forwarded_message, mock_context)
+    
+                            # Should NOT reply with document, but with summary text
+                            # mock_forwarded_message.message.reply_document.assert_called_once()
+                            
+                            # Should call reply_text with summary
+                            assert mock_forwarded_message.message.reply_text.call_count >= 2 # 1 for processing, 1 for summary
+                            summary_call = mock_forwarded_message.message.reply_text.call_args_list[-1]
+                            # Check for <a> tag if link is mocked or present
+                            assert "<b>" in summary_call[0][0]
+                            assert "Test User" in summary_call[0][0]
+                            assert summary_call[1]["parse_mode"] == "HTML"
 
     @pytest.mark.asyncio
     async def test_handle_message_title_is_first_paragraph(self, converter, mock_update, mock_context):
@@ -316,17 +338,18 @@ class TestTelegramToEpub:
         mock_update.message.forward_origin.sender_user = MagicMock()
         mock_update.message.forward_origin.sender_user.full_name = "Test User"
         mock_update.message.text = "Заголовок\n\nТело поста"
-
+    
         processing_msg = MagicMock()
         processing_msg.delete = AsyncMock()
         mock_update.message.reply_text = AsyncMock(return_value=processing_msg)
-
+    
         with patch('bot.dropbox_module.upload_to_dropbox', return_value=True), \
              patch('bot.create_epub', return_value='/tmp/test.epub') as mock_create, \
              patch('builtins.open', MagicMock()), \
-             patch('os.path.exists', return_value=True):
+             patch('os.path.exists', return_value=True), \
+             patch('os.remove'):
             await converter.handle_message(mock_update, mock_context)
-
+    
         args, _kwargs = mock_create.call_args
         assert args[0] == "Заголовок"
         assert "Тело поста" in args[2]
@@ -341,7 +364,7 @@ class TestTelegramToEpub:
         mock_update.message.forward_origin.sender_user.full_name = "Test User"
         mock_update.message.text = None
         mock_update.message.caption = "Test caption content"
-
+    
         # Create a processing message mock
         processing_msg = MagicMock()
         processing_msg.delete = AsyncMock()
@@ -352,9 +375,11 @@ class TestTelegramToEpub:
             with patch('bot.create_epub', return_value='/tmp/test.epub'):  # Patch with correct path
                 with patch('builtins.open', MagicMock()):
                     with patch('os.path.exists', return_value=True):
-                        await converter.handle_message(mock_update, mock_context)
-
-                        mock_update.message.reply_document.assert_called_once()
+                        with patch('os.remove'):
+                            await converter.handle_message(mock_update, mock_context)
+    
+                            # mock_update.message.reply_document.assert_called_once()
+                            assert mock_update.message.reply_text.call_count >= 2
 
     # Test message handling - exception (FIXED)
     @pytest.mark.asyncio
@@ -404,7 +429,7 @@ class TestTelegramToEpub:
         mock_update.message.forward_origin.sender_chat = MagicMock()
         mock_update.message.forward_origin.sender_chat.title = "Test Channel"
         mock_update.message.text = "Test message"
-
+    
         # Create a processing message mock
         processing_msg = MagicMock()
         processing_msg.delete = AsyncMock()
@@ -415,10 +440,11 @@ class TestTelegramToEpub:
             with patch('bot.create_epub', return_value='/tmp/test.epub'):  # Patch with correct path
                 with patch('builtins.open', MagicMock()):
                     with patch('os.path.exists', return_value=True):
-                        await converter.handle_message(mock_update, mock_context)
-                        
-                        mock_update.message.reply_document.assert_called_once()
-
+                        with patch('os.remove'):
+                            await converter.handle_message(mock_update, mock_context)
+                            
+                            # mock_update.message.reply_document.assert_called_once()
+                            assert mock_update.message.reply_text.call_count >= 2
 
 # Integration test for main function
 @patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': 'test_token'})

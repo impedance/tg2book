@@ -56,3 +56,4 @@ htmlcov/
 *.mp4
 .env
 .venv/
+docker-compose.override.yml

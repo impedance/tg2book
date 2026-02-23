@@ -38,7 +38,21 @@ class TelegramToEpub:
         self.processing_semaphore = asyncio.Semaphore(1)
 
     def __del__(self):
-        shutil.rmtree(self.temp_dir)
+        try:
+            if hasattr(self, 'temp_dir') and os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir)
+        except Exception:
+            pass
+
+    def strip_emojis(self, text: str) -> str:
+        """Removes emojis and other special characters from text."""
+        if not text:
+            return ""
+        # Match anything that is NOT a basic character (simplified regex for now)
+        # This matches common emoji ranges and some other symbols
+        clean = re.sub(r'[^\w\s\-_.,()!?:;а-яёА-ЯЁ/]', '', text)
+        # Also collapse multiple spaces
+        return re.sub(r'\s+', ' ', clean).strip()
 
     def extract_title(self, text: str) -> str:
         """Берёт заголовок как первый абзац (до пустой строки)."""
@@ -230,18 +244,35 @@ class TelegramToEpub:
                     logger.error(f"Ошибка удаления временного файла: {e}")
 
                 # Prepare summary message
-                summary_text = f"{title}"
-                if source_name and source_name != "Unknown Source":
-                     # Escape brackets for HTML if needed, but simple text is safer for now unless parse_mode is set.
-                     # Using standard text for now.
-                     summary_text += f"\nИсточник: {source_name}"
+                clean_title = self.strip_emojis(title)
+                clean_source = self.strip_emojis(source_name)
                 
-                if link:
-                    summary_text += f"\n{link}"
+                # Determine the link to use: use message.link (original post) if available, 
+                # otherwise fallback to first link in text, or just bold text if no link.
+                post_link = ""
+                if forward_origin and hasattr(forward_origin, "chat") and forward_origin.chat and forward_origin.message_id:
+                    # Construct link from chat username/id and message_id
+                    if forward_origin.chat.username:
+                        post_link = f"https://t.me/{forward_origin.chat.username}/{forward_origin.message_id}"
+                
+                if not post_link:
+                    post_link = link or ""
+
+                if post_link:
+                    summary_text = f'<b><a href="{post_link}">{clean_title}</a></b>'
+                else:
+                    summary_text = f'<b>{clean_title}</b>'
+
+                if clean_source and clean_source != "Unknown Source":
+                     # Add a separator if title is present
+                     if summary_text:
+                         summary_text += f" {clean_source}"
+                     else:
+                         summary_text = clean_source
 
                 # Send summary
                 await processing_msg.delete()
-                await message.reply_text(summary_text, disable_web_page_preview=False)
+                await message.reply_text(summary_text, disable_web_page_preview=False, parse_mode='HTML')
                 
                 # Delete original message
                 try:
@@ -289,13 +320,34 @@ class TelegramToEpub:
             base_name = os.path.splitext(file_name)[0]
             safe_filename = self.sanitize_filename(base_name) or "document"
             send_filename = f"{safe_filename}.epub"
+            
+            # Prepare caption
+            forward_origin = getattr(message, "forward_origin", None)
+            source_name = self.get_source_info(message)
+            clean_title = self.strip_emojis(base_name)
+            clean_source = self.strip_emojis(source_name)
+            
+            # Link for caption
+            post_link = ""
+            if forward_origin and hasattr(forward_origin, "chat") and forward_origin.chat and forward_origin.message_id:
+                if forward_origin.chat.username:
+                    post_link = f"https://t.me/{forward_origin.chat.username}/{forward_origin.message_id}"
+            
+            if post_link:
+                caption = f'<b><a href="{post_link}">{clean_title}</a></b>'
+            else:
+                caption = f'<b>{clean_title}</b>'
+            
+            if clean_source and clean_source != "Unknown Source":
+                caption += f" {clean_source}"
 
             await processing_msg.delete()
             with open(temp_path, "rb") as epub_file:
                 await message.reply_document(
                     document=epub_file,
                     filename=send_filename,
-                    caption="📖 Ваш EPUB файл готов!"
+                    caption=caption,
+                    parse_mode='HTML'
                 )
             logger.info("EPUB документ отправлен пользователю.")
 
