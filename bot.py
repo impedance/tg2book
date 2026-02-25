@@ -216,7 +216,9 @@ class TelegramToEpub:
                 link = self.get_first_link(message)
 
                 with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp_file:
-                    epub_path = create_epub(title, source_name, content, tmp_file.name)
+                    epub_path = await asyncio.to_thread(
+                        create_epub, title, source_name, content, tmp_file.name
+                    )
 
                 if not os.path.exists(epub_path):
                     logger.error(f"Файл не был создан: {epub_path}")
@@ -229,7 +231,9 @@ class TelegramToEpub:
                 dropbox_filename = f"{safe_filename}.epub"
                 dropbox_success = False
                 try:
-                    dropbox_success = dropbox_module.upload_to_dropbox(epub_path, dropbox_filename)
+                    dropbox_success = await asyncio.to_thread(
+                        dropbox_module.upload_to_dropbox, epub_path, dropbox_filename
+                    )
                     if dropbox_success:
                         logger.info("Загрузка в Dropbox завершена успешно")
                     else:
@@ -353,7 +357,9 @@ class TelegramToEpub:
 
             try:
                 dropbox_filename = send_filename
-                dropbox_module.upload_to_dropbox(temp_path, dropbox_filename)
+                await asyncio.to_thread(
+                    dropbox_module.upload_to_dropbox, temp_path, dropbox_filename
+                )
                 logger.info("EPUB документ загружен в Dropbox.")
             except Exception as e:
                 logger.error(f"Ошибка при загрузке EPUB в Dropbox: {e}")

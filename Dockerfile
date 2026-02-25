@@ -3,10 +3,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libxml2-dev libxslt1-dev libjpeg-dev zlib1g-dev && \
-    rm -rf /var/lib/apt/lists/*
-
+# No system-level build deps needed: Pillow/lxml/ebooklib are removed
 RUN useradd -m botuser
 
 WORKDIR /app

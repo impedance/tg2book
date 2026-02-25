@@ -1,126 +1,127 @@
-# This module contains functions for interacting with Dropbox.
-import os
-import subprocess
+"""
+dropbox_module.py — Dropbox uploader via direct HTTP (no SDK, no subprocess).
+
+Uses only `requests` (already a dependency) and stdlib.
+"""
+
+import json
 import logging
-import requests
-import argparse
+import os
 import re
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+import requests
 
-def redact_access_token(text):
-    """Redacts the access token from the given text."""
-    return re.sub(r'"access_token": ".*?"', '"access_token": "..."', text)
+logger = logging.getLogger(__name__)
 
-def refresh_access_token():
-    """Refreshes the Dropbox access token."""
-    url = "https://api.dropbox.com/oauth2/token"
-    data = {
-        "grant_type": "refresh_token",
-        "refresh_token": os.getenv("DROPBOX_REFRESH_TOKEN")
-    }
+_DROPBOX_FOLDER = "/Apps/Dropbox PocketBook/from-bot/"
+_TOKEN_URL = "https://api.dropbox.com/oauth2/token"
+_UPLOAD_URL = "https://content.dropboxapi.com/2/files/upload"
+
+
+def redact_access_token(text: str) -> str:
+    """Redact access token value from log strings."""
+    return re.sub(r'"access_token":\s*"[^"]+"', '"access_token": "***"', text)
+
+
+def refresh_access_token() -> str | None:
+    """Obtain a short-lived access token via OAuth2 refresh-token grant.
+
+    Returns the token string on success, or *None* on failure.
+    """
+    refresh_token = os.getenv("DROPBOX_REFRESH_TOKEN")
     app_key = os.getenv("DROPBOX_APP_KEY")
     app_secret = os.getenv("DROPBOX_APP_SECRET")
 
-    response = requests.post(url, data=data, auth=(app_key, app_secret))
-    
-    if response.status_code == 200:
-        access_token = response.json()["access_token"]
-        return access_token
-    else:
-        logging.error(f"Failed to refresh access token: {response.status_code}")
+    try:
+        response = requests.post(
+            _TOKEN_URL,
+            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+            auth=(app_key, app_secret),
+        )
+    except Exception as exc:
+        logger.error("Failed to request Dropbox token: %s", exc)
         return None
 
-def upload_to_dropbox(file_path, custom_filename=None):
-    """Uploads a file to Dropbox."""
-    try:
-        logging.info(f"Начинаем загрузку файла: {file_path}")
-        
-        # Проверяем существование локального файла
-        if not os.path.exists(file_path):
-            logging.error(f"Локальный файл не существует: {file_path}")
-            return False
-        
-        file_size = os.path.getsize(file_path)
-        logging.info(f"Размер файла: {file_size} байт")
+    if response.status_code == 200:
+        token = response.json().get("access_token")
+        logger.info("Dropbox access token refreshed successfully.")
+        return token
 
-        # Refresh access token
-        logging.info("Получаем access token...")
-        access_token = refresh_access_token()
+    logger.error("Dropbox token refresh failed: HTTP %s", response.status_code)
+    return None
 
-        if not access_token:
-            logging.error("Failed to obtain access token. Aborting upload.")
-            return False
 
-        logging.info("Access token получен успешно")
+def upload_to_dropbox(file_path: str, custom_filename: str | None = None) -> bool:
+    """Upload *file_path* to the configured Dropbox folder.
 
-        # Формируем путь в Dropbox (добавляем имя файла к папке)
-        filename = custom_filename if custom_filename else os.path.basename(file_path)
-        dropbox_folder = "/Apps/Dropbox PocketBook/from-bot/"
-        dropbox_full_path = dropbox_folder + filename
-        
-        logging.info(f"Локальный файл: {file_path}")
-        logging.info(f"Папка в Dropbox: {dropbox_folder}")
-        logging.info(f"Полный путь в Dropbox: {dropbox_full_path}")
+    Uses the Dropbox Content API v2 directly via HTTP — no subprocess,
+    no Dropbox SDK.  Returns True on success, False on any failure.
+    """
+    logger.info("Starting Dropbox upload: %s", file_path)
 
-        # Construct the upload command
-        command = [
-            "python3",
-            "dropbox-loader.py",
-            file_path,
-            dropbox_full_path,
-            "--access-token",
-            access_token
-        ]
-        
-        # Логируем команду (без токена)
-        safe_command = command.copy()
-        safe_command[-1] = "***HIDDEN***"
-        logging.info(f"Команда для выполнения: {safe_command}")
-
-        # Execute the command
-        logging.info("Выполняем команду загрузки...")
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-
-        # Decode bytes to string if needed
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode()
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode()
-
-        logging.info(f"Stdout: {stdout.strip()}")
-        
-        # Check if upload was actually successful by looking at stdout
-        if "Успешно завершено!" in stdout or "Загрузка завершена успешно!" in stdout:
-            logging.info(f"Dropbox upload completed successfully")
-            if stderr:
-                logging.warning(f"Stderr (warnings): {stderr.strip()}")
-            return True
-        elif stderr:
-            logging.error(f"Stderr: {stderr.strip()}")
-            return False
-        else:
-            logging.info(f"Dropbox upload completed successfully")
-            return True
-
-    except Exception as e:
-        logging.error(f"Error uploading to Dropbox: {e}")
+    if not os.path.exists(file_path):
+        logger.error("Local file does not exist: %s", file_path)
         return False
 
-def manual_upload(file_path):
-    """Manually triggers a Dropbox upload and displays logs."""
-    logging.info(f"Starting manual upload for: {file_path}")
+    file_size = os.path.getsize(file_path)
+    logger.info("File size: %d bytes", file_size)
+
+    access_token = refresh_access_token()
+    if not access_token:
+        logger.error("Cannot obtain access token — aborting upload.")
+        return False
+
+    filename = custom_filename if custom_filename else os.path.basename(file_path)
+    dropbox_path = _DROPBOX_FOLDER + filename
+    logger.info("Uploading to Dropbox path: %s", dropbox_path)
+
+    api_arg = json.dumps(
+        {
+            "path": dropbox_path,
+            "mode": "overwrite",
+            "autorename": False,
+            "mute": False,
+        }
+    )
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/octet-stream",
+        "Dropbox-API-Arg": api_arg,
+    }
+
+    try:
+        with open(file_path, "rb") as fh:
+            data = fh.read()
+
+        response = requests.post(_UPLOAD_URL, headers=headers, data=data)
+    except Exception as exc:
+        logger.error("Error during Dropbox HTTP upload: %s", exc)
+        return False
+
+    if response.status_code == 200:
+        logger.info("Dropbox upload succeeded.")
+        return True
+
+    logger.error("Dropbox upload failed: HTTP %s — %s", response.status_code, response.text[:200])
+    return False
+
+
+def manual_upload(file_path: str) -> None:
+    """CLI helper: upload a file and print result to stdout."""
     success = upload_to_dropbox(file_path)
     if success:
-        logging.info(f"Manual upload for {file_path} completed successfully.")
+        logger.info("Manual upload for %s completed successfully.", file_path)
     else:
-        logging.error(f"Manual upload for {file_path} failed.")
+        logger.error("Manual upload for %s failed.", file_path)
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Manually upload a file to Dropbox.")
-    parser.add_argument("file_path", help="The path to the file to upload.")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Upload a file to Dropbox.")
+    parser.add_argument("file_path", help="Path to the local file.")
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.INFO)
     manual_upload(args.file_path)
