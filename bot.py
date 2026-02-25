@@ -205,6 +205,7 @@ class TelegramToEpub:
 
             processing_msg = await message.reply_text("📚 Создаю EPUB файл...")
 
+            epub_path = None
             try:
                 full_text = text_content
                 title = self.extract_title(full_text)
@@ -215,10 +216,13 @@ class TelegramToEpub:
                 source_name = self.get_source_info(message)
                 link = self.get_first_link(message)
 
+                # Obtain a unique path without keeping the file descriptor open,
+                # so create_epub (zipfile) can write to it without contention.
                 with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp_file:
-                    epub_path = await asyncio.to_thread(
-                        create_epub, title, source_name, content, tmp_file.name
-                    )
+                    epub_path = tmp_file.name
+                epub_path = await asyncio.to_thread(
+                    create_epub, title, source_name, content, epub_path
+                )
 
                 if not os.path.exists(epub_path):
                     logger.error(f"Файл не был создан: {epub_path}")
@@ -240,12 +244,6 @@ class TelegramToEpub:
                         logger.error("Загрузка в Dropbox не удалась")
                 except Exception as e:
                     logger.error(f"Ошибка загрузки в Dropbox: {e}")
-
-                # Clean up temp file
-                try:
-                    os.remove(epub_path)
-                except Exception as e:
-                    logger.error(f"Ошибка удаления временного файла: {e}")
 
                 # Prepare summary message
                 clean_title = self.strip_emojis(title)
@@ -292,6 +290,13 @@ class TelegramToEpub:
                 except Exception:
                     pass
                 await message.reply_text("❌ Извините, произошла ошибка при обработке вашего сообщения.")
+            finally:
+                # Guaranteed cleanup: remove temp file regardless of success or failure
+                if epub_path and os.path.exists(epub_path):
+                    try:
+                        os.remove(epub_path)
+                    except Exception as e:
+                        logger.error(f"Ошибка удаления временного файла: {e}")
 
     async def _process_uploaded_epub(self, message, context):
         """Process an uploaded EPUB document and forward it back with Dropbox sync."""

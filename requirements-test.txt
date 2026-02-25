@@ -1,3 +1,4 @@
-pytest==8.0.0
-coverage==6.5.0
-python-telegram-bot
+-r requirements.txt
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0

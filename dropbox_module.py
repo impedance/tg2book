@@ -17,6 +17,9 @@ _DROPBOX_FOLDER = "/Apps/Dropbox PocketBook/from-bot/"
 _TOKEN_URL = "https://api.dropbox.com/oauth2/token"
 _UPLOAD_URL = "https://content.dropboxapi.com/2/files/upload"
 
+CONNECT_TIMEOUT = 5   # seconds to establish a TCP connection
+READ_TIMEOUT = 30     # seconds to wait for the server to send data
+
 
 def redact_access_token(text: str) -> str:
     """Redact access token value from log strings."""
@@ -37,7 +40,15 @@ def refresh_access_token() -> str | None:
             _TOKEN_URL,
             data={"grant_type": "refresh_token", "refresh_token": refresh_token},
             auth=(app_key, app_secret),
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
         )
+    except requests.exceptions.Timeout:
+        logger.error(
+            "Dropbox token refresh timed out (connect=%ss, read=%ss).",
+            CONNECT_TIMEOUT,
+            READ_TIMEOUT,
+        )
+        return None
     except Exception as exc:
         logger.error("Failed to request Dropbox token: %s", exc)
         return None
@@ -94,7 +105,19 @@ def upload_to_dropbox(file_path: str, custom_filename: str | None = None) -> boo
         with open(file_path, "rb") as fh:
             data = fh.read()
 
-        response = requests.post(_UPLOAD_URL, headers=headers, data=data)
+        response = requests.post(
+            _UPLOAD_URL,
+            headers=headers,
+            data=data,
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        )
+    except requests.exceptions.Timeout:
+        logger.error(
+            "Dropbox upload timed out (connect=%ss, read=%ss).",
+            CONNECT_TIMEOUT,
+            READ_TIMEOUT,
+        )
+        return False
     except Exception as exc:
         logger.error("Error during Dropbox HTTP upload: %s", exc)
         return False

@@ -239,6 +239,8 @@ class TestRefreshAccessToken:
         args, kwargs = mock_post.call_args
         assert "oauth2/token" in args[0]
         assert kwargs["data"]["grant_type"] == "refresh_token"
+        # Timeout must always be passed to prevent thread exhaustion
+        assert "timeout" in kwargs, "timeout kwarg must be set on requests.post"
 
     @patch.dict(
         os.environ,
@@ -293,6 +295,9 @@ class TestUploadToDropbox:
         mock_post.assert_called_once()
         # Should hit content.dropboxapi.com/2/files/upload
         assert "dropboxapi.com" in mock_post.call_args[0][0]
+        # Timeout must always be passed to prevent thread exhaustion
+        _args, call_kwargs = mock_post.call_args
+        assert "timeout" in call_kwargs, "timeout kwarg must be set on requests.post"
 
     def test_api_error_returns_false(self, tmp_path):
         dm = _load_real_dropbox_module()
@@ -349,6 +354,44 @@ class TestUploadToDropbox:
         import json
         api_arg = json.loads(headers.get("Dropbox-API-Arg", "{}"))
         assert "my_custom_name.epub" in api_arg.get("path", "")
+
+
+class TestDropboxTimeouts:
+    """Verify that Timeout exceptions are handled gracefully (no crash, returns falsy)."""
+
+    @patch.dict(
+        os.environ,
+        {
+            "DROPBOX_REFRESH_TOKEN": "rtoken",
+            "DROPBOX_APP_KEY": "appkey",
+            "DROPBOX_APP_SECRET": "appsecret",
+        },
+    )
+    def test_refresh_token_connect_timeout_returns_none(self):
+        """Connection timeout during token refresh must return None, not raise."""
+        import requests as _requests
+        dm = _load_real_dropbox_module()
+        with patch.object(
+            dm.requests,
+            "post",
+            side_effect=dm.requests.exceptions.Timeout("connect timed out"),
+        ):
+            result = dm.refresh_access_token()
+        assert result is None
+
+    def test_upload_read_timeout_returns_false(self, tmp_path):
+        """Read timeout during file upload must return False, not raise."""
+        dm = _load_real_dropbox_module()
+        f = tmp_path / "book.epub"
+        f.write_bytes(b"fakeepubcontent")
+        with patch.object(dm, "refresh_access_token", return_value="tok123"), \
+             patch.object(
+                 dm.requests,
+                 "post",
+                 side_effect=dm.requests.exceptions.Timeout("read timed out"),
+             ):
+            result = dm.upload_to_dropbox(str(f))
+        assert result is False
 
 
 # ===========================================================================
