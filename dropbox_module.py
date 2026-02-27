@@ -59,7 +59,7 @@ def refresh_access_token() -> Optional[str]:
     if response.status_code == 200:
         token = response.json().get("access_token")
         logger.info("Dropbox access token refreshed successfully.")
-        return token
+        return str(token) if token is not None else None
 
     logger.error("Dropbox token refresh failed: HTTP %s", response.status_code)
     return None

@@ -135,6 +135,8 @@ class TestTelegramToEpub:
 
         await converter.handle_message(mock_update, mock_context)
         assert mock_update.message.reply_document.called
+        # Verify Dropbox upload service was also called (acceptance criteria 3.8)
+        mock_process.assert_called_once()
 
     def test_extract_title(self):
         real_text_utils = _load_real_text_utils()
