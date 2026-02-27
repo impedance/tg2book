@@ -8,3 +8,5 @@ services:
     mem_limit: 768m
     mem_reservation: 512m
     cpus: 0.75
+    volumes:
+      - ./data:/app/data

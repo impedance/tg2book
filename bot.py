@@ -4,7 +4,7 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Any, List
+from typing import Any, List, Optional
 
 from telegram import Message, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -13,10 +13,13 @@ from config import settings
 from services import epub_service
 from utils.text_utils import sanitize_filename, strip_emojis
 
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
 
 class HTTPRequestFilter(logging.Filter):
     def filter(self, record):
-        # Фильтруем все HTTP запросы к Telegram API
         return "HTTP Request:" not in record.getMessage()
 
 
@@ -28,19 +31,62 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# Применяем фильтр к различным логгерам, которые могут генерировать HTTP логи
 http_filter = HTTPRequestFilter()
 logger.addFilter(http_filter)
 logging.getLogger("httpx").addFilter(http_filter)
 logging.getLogger("urllib3").addFilter(http_filter)
 logging.getLogger("telegram").addFilter(http_filter)
-logging.getLogger().addFilter(http_filter)  # Корневой логгер
+logging.getLogger().addFilter(http_filter)
+
+# ---------------------------------------------------------------------------
+# Userbot (Pyrogram) — optional, only active when API_ID / API_HASH are set
+# ---------------------------------------------------------------------------
+
+_pyrogram_available = False
+try:
+    from pyrogram import Client as PyrogramClient
+    from pyrogram import filters as pyro_filters
+
+    _pyrogram_available = True
+except ImportError:
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Processing queue item
+# ---------------------------------------------------------------------------
+
+
+class _QueueItem:
+    """Holds the data needed to process one message from a monitored channel."""
+
+    def __init__(
+        self,
+        text: str,
+        source_name: str,
+        post_link: str,
+        reply_chat_id: int,
+        bot: Any,
+    ):
+        self.text = text
+        self.source_name = source_name
+        self.post_link = post_link
+        self.reply_chat_id = reply_chat_id
+        self.bot = bot
+
+
+# ---------------------------------------------------------------------------
+# Main bot class
+# ---------------------------------------------------------------------------
 
 
 class TelegramToEpub:
     def __init__(self):
         self.temp_dir = tempfile.mkdtemp()
-        self.processing_semaphore = asyncio.Semaphore(1)
+        # Producer-Consumer queue: capacity = unlimited, concurrency enforced by single worker
+        self.processing_queue: asyncio.Queue = asyncio.Queue()
+        self._worker_task: Optional[asyncio.Task] = None
+        self._userbot: Optional[Any] = None  # Pyrogram Client or None
 
     def __del__(self):
         try:
@@ -48,6 +94,158 @@ class TelegramToEpub:
                 shutil.rmtree(self.temp_dir)
         except Exception:
             pass
+
+    # ------------------------------------------------------------------
+    # Lifecycle hooks (called by python-telegram-bot Application)
+    # ------------------------------------------------------------------
+
+    async def post_init(self, application: Application) -> None:
+        """Start background worker and optionally the Pyrogram userbot."""
+        # Start queue worker
+        self._worker_task = asyncio.create_task(self._channel_worker())
+        logger.info("Queue worker started")
+
+        # Start Pyrogram userbot if credentials are configured
+        if _pyrogram_available and settings.API_ID and settings.API_HASH:
+            await self._start_userbot(application)
+        else:
+            logger.info(
+                "Userbot не настроен (API_ID / API_HASH отсутствуют). "
+                "Автопересылка из каналов отключена."
+            )
+
+    async def post_stop(self, application: Application) -> None:
+        """Stop background worker and Pyrogram userbot gracefully."""
+        # Stop queue worker
+        if self._worker_task and not self._worker_task.done():
+            self._worker_task.cancel()
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Queue worker stopped")
+
+        # Stop Pyrogram userbot
+        if self._userbot:
+            try:
+                await self._userbot.stop()
+                logger.info("Pyrogram userbot stopped")
+            except Exception as e:
+                logger.error(f"Ошибка при остановке юзербота: {e}")
+
+    # ------------------------------------------------------------------
+    # Pyrogram userbot
+    # ------------------------------------------------------------------
+
+    async def _start_userbot(self, application: Application) -> None:
+        """Initialize and start the Pyrogram client inside the current event loop."""
+        import os
+        from pathlib import Path
+
+        data_dir = Path(os.environ.get("DATA_DIR", "data"))
+        data_dir.mkdir(parents=True, exist_ok=True)
+        session_name = str(data_dir / "userbot")
+
+        self._userbot = PyrogramClient(
+            session_name,
+            api_id=settings.API_ID,
+            api_hash=settings.API_HASH,
+            # Don't let Pyrogram install its own signal handlers — PTB owns the loop
+            no_updates=False,
+        )
+
+        # Register the channel message handler on the Pyrogram client
+        @self._userbot.on_message(pyro_filters.channel)
+        async def _on_channel_message(client, message):
+            await self._handle_channel_message(message, application.bot)
+
+        await self._userbot.start()
+        me = await self._userbot.get_me()
+        logger.info(f"Pyrogram userbot запущен как @{me.username} (id={me.id})")
+
+    # ------------------------------------------------------------------
+    # Channel message handler (Pyrogram)
+    # ------------------------------------------------------------------
+
+    async def _handle_channel_message(self, pyro_message: Any, ptb_bot: Any) -> None:
+        """Called by Pyrogram when a new message arrives in any channel."""
+        from userbot_db import get_channels
+
+        # Check if this channel is in our watchlist
+        channels = await get_channels()
+        chat_username = (
+            pyro_message.chat.username or ""
+        ).lower()
+
+        if chat_username not in channels:
+            return
+
+        text = pyro_message.text or pyro_message.caption or ""
+        if not text:
+            logger.debug(f"Канал @{chat_username}: сообщение без текста, пропускаем")
+            return
+
+        admin_id = settings.ADMIN_ID
+        if not admin_id:
+            logger.warning("ADMIN_ID не задан. Некуда отправить результат из канала.")
+            return
+
+        source_name = pyro_message.chat.title or chat_username
+        post_link = ""
+        if pyro_message.chat.username:
+            post_link = (
+                f"https://t.me/{pyro_message.chat.username}/{pyro_message.id}"
+            )
+
+        item = _QueueItem(
+            text=text,
+            source_name=source_name,
+            post_link=post_link,
+            reply_chat_id=admin_id,
+            bot=ptb_bot,
+        )
+        await self.processing_queue.put(item)
+        logger.info(
+            f"Сообщение из @{chat_username} помещено в очередь (size={self.processing_queue.qsize()})"
+        )
+
+    # ------------------------------------------------------------------
+    # Background worker (Producer-Consumer, concurrency = 1)
+    # ------------------------------------------------------------------
+
+    async def _channel_worker(self) -> None:
+        """Consumes _QueueItem objects one at a time, converts text → EPUB, sends to admin."""
+        logger.info("Channel worker ожидает задачи...")
+        while True:
+            try:
+                item: _QueueItem = await self.processing_queue.get()
+                try:
+                    await self._process_queue_item(item)
+                except Exception as e:
+                    logger.error(f"Ошибка обработки задачи из очереди: {e}")
+                finally:
+                    self.processing_queue.task_done()
+            except asyncio.CancelledError:
+                logger.info("Channel worker отменён, выходим")
+                break
+
+    async def _process_queue_item(self, item: _QueueItem) -> None:
+        """Convert a channel message to EPUB and send it to the admin."""
+        logger.info(f"Обработка из очереди: source={item.source_name!r}")
+        summary_text = await epub_service.process_text_to_epub(
+            item.text, item.source_name, item.post_link
+        )
+        await item.bot.send_message(
+            chat_id=item.reply_chat_id,
+            text=summary_text,
+            parse_mode="HTML",
+            disable_web_page_preview=False,
+        )
+        logger.info(f"EPUB из канала '{item.source_name}' отправлен на admin {item.reply_chat_id}")
+
+    # ------------------------------------------------------------------
+    # Helpers shared between PTB and Pyrogram paths
+    # ------------------------------------------------------------------
 
     def get_first_link(self, message: Message) -> str:
         """Extract the first URL from message entities or caption entities, fallback to message link."""
@@ -62,7 +260,6 @@ class TelegramToEpub:
                 length = entity.length
                 return str(text[offset : offset + length])
 
-        # If no link found in text, try the message link (useful for public channels)
         return str(message.link or "")
 
     def get_source_info(self, message: Message) -> str:
@@ -86,6 +283,17 @@ class TelegramToEpub:
         """Get text content from message.text or message.caption"""
         return message.text or message.caption or ""
 
+    # ------------------------------------------------------------------
+    # Admin-only check
+    # ------------------------------------------------------------------
+
+    def _is_admin(self, user_id: int) -> bool:
+        return settings.ADMIN_ID is not None and user_id == settings.ADMIN_ID
+
+    # ------------------------------------------------------------------
+    # PTB command handlers
+    # ------------------------------------------------------------------
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send a message when the command /start is issued."""
         if update.message:
@@ -101,8 +309,75 @@ class TelegramToEpub:
                 "Чтобы конвертировать сообщение в EPUB:\n"
                 "1. Выберите сообщение, которое хотите конвертировать\n"
                 "2. Перешлите его мне\n"
-                "3. Я создам EPUB файл и отправлю его вам"
+                "3. Я создам EPUB файл и отправлю его вам\n\n"
+                "Команды управления каналами (только для администратора):\n"
+                "/add_channel @username — добавить канал для отслеживания\n"
+                "/del_channel @username — удалить канал\n"
+                "/list_channels — список отслеживаемых каналов"
             )
+
+    async def add_channel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Add a channel to the monitored list (admin only)."""
+        if not update.message:
+            return
+        if not self._is_admin(update.message.from_user.id):
+            await update.message.reply_text("⛔ Команда доступна только администратору.")
+            return
+
+        if not context.args:
+            await update.message.reply_text("Использование: /add_channel <@username или username>")
+            return
+
+        from userbot_db import add_channel as db_add_channel
+
+        username = context.args[0].lstrip("@").lower()
+        added = await db_add_channel(username)
+        if added:
+            await update.message.reply_text(f"✅ Канал @{username} добавлен в список отслеживания.")
+        else:
+            await update.message.reply_text(f"ℹ️ Канал @{username} уже в списке.")
+
+    async def del_channel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Remove a channel from the monitored list (admin only)."""
+        if not update.message:
+            return
+        if not self._is_admin(update.message.from_user.id):
+            await update.message.reply_text("⛔ Команда доступна только администратору.")
+            return
+
+        if not context.args:
+            await update.message.reply_text("Использование: /del_channel <@username или username>")
+            return
+
+        from userbot_db import remove_channel as db_remove_channel
+
+        username = context.args[0].lstrip("@").lower()
+        removed = await db_remove_channel(username)
+        if removed:
+            await update.message.reply_text(f"✅ Канал @{username} удалён из списка.")
+        else:
+            await update.message.reply_text(f"ℹ️ Канал @{username} не найден в списке.")
+
+    async def list_channels(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """List all monitored channels (admin only)."""
+        if not update.message:
+            return
+        if not self._is_admin(update.message.from_user.id):
+            await update.message.reply_text("⛔ Команда доступна только администратору.")
+            return
+
+        from userbot_db import get_channels as db_get_channels
+
+        channels = await db_get_channels()
+        if not channels:
+            await update.message.reply_text("Список отслеживаемых каналов пуст.")
+        else:
+            lines = "\n".join(f"• @{ch}" for ch in channels)
+            await update.message.reply_text(f"📋 Отслеживаемые каналы:\n{lines}")
+
+    # ------------------------------------------------------------------
+    # PTB message handler (forwarded messages & direct EPUB uploads)
+    # ------------------------------------------------------------------
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages."""
@@ -128,73 +403,67 @@ class TelegramToEpub:
                 )
                 return
 
-        async with self.processing_semaphore:
-            if message.document:
-                await self._process_uploaded_epub(message, context)
-                return
+        if message.document:
+            await self._process_uploaded_epub(message, context)
+            return
 
-            logger.info(f"Обработка сообщения от пользователя: {message.chat.id}")
+        logger.info(f"Обработка сообщения от пользователя: {message.chat.id}")
 
-            if forward_origin:
-                if forward_origin.type == "user" and forward_origin.sender_user:
-                    logger.info(
-                        f"Переслано от пользователя: {forward_origin.sender_user.full_name or forward_origin.sender_user.username}"
-                    )
-                elif forward_origin.type == "chat" and forward_origin.sender_chat:
-                    logger.info(f"Переслано из чата: {forward_origin.sender_chat.title}")
-                elif forward_origin.type == "channel" and forward_origin.sender_chat:
-                    logger.info(f"Переслано из канала: {forward_origin.sender_chat.title}")
-                elif forward_origin.type == "hidden_user":
-                    logger.info("Переслано от анонимного пользователя")
+        if forward_origin:
+            if forward_origin.type == "user" and forward_origin.sender_user:
+                logger.info(
+                    f"Переслано от пользователя: {forward_origin.sender_user.full_name or forward_origin.sender_user.username}"
+                )
+            elif forward_origin.type == "chat" and forward_origin.sender_chat:
+                logger.info(f"Переслано из чата: {forward_origin.sender_chat.title}")
+            elif forward_origin.type == "channel" and forward_origin.sender_chat:
+                logger.info(f"Переслано из канала: {forward_origin.sender_chat.title}")
+            elif forward_origin.type == "hidden_user":
+                logger.info("Переслано от анонимного пользователя")
 
-            processing_msg = await message.reply_text("📚 Создаю EPUB файл...")
+        processing_msg = await message.reply_text("📚 Создаю EPUB файл...")
+
+        try:
+            source_name = self.get_source_info(message)
+            first_link = self.get_first_link(message)
+
+            post_link = ""
+            if (
+                forward_origin
+                and hasattr(forward_origin, "chat")
+                and forward_origin.chat
+                and forward_origin.message_id
+            ):
+                if forward_origin.chat.username:
+                    post_link = f"https://t.me/{forward_origin.chat.username}/{forward_origin.message_id}"
+
+            if not post_link:
+                post_link = first_link
+
+            summary_text = await epub_service.process_text_to_epub(
+                text_content, source_name, post_link
+            )
+
+            await processing_msg.delete()
+            await message.reply_text(
+                summary_text, disable_web_page_preview=False, parse_mode="HTML"
+            )
 
             try:
-                source_name = self.get_source_info(message)
-                first_link = self.get_first_link(message)
-
-                # Determine the post link to use
-                post_link = ""
-                if (
-                    forward_origin
-                    and hasattr(forward_origin, "chat")
-                    and forward_origin.chat
-                    and forward_origin.message_id
-                ):
-                    if forward_origin.chat.username:
-                        post_link = f"https://t.me/{forward_origin.chat.username}/{forward_origin.message_id}"
-
-                if not post_link:
-                    post_link = first_link
-
-                summary_text = await epub_service.process_text_to_epub(
-                    text_content, source_name, post_link
-                )
-
-                # Send summary
-                await processing_msg.delete()
-                await message.reply_text(
-                    summary_text, disable_web_page_preview=False, parse_mode="HTML"
-                )
-
-                # Delete original message
-                try:
-                    await message.delete()
-                    logger.info("Исходное сообщение удалено")
-                except Exception as e:
-                    logger.error(f"Не удалось удалить исходное сообщение: {e}")
-
+                await message.delete()
+                logger.info("Исходное сообщение удалено")
             except Exception as e:
-                logger.error(f"Ошибка обработки сообщения: {e}")
-                try:
-                    await processing_msg.delete()
-                except Exception:
-                    pass
-                await message.reply_text(
-                    "❌ Извините, произошла ошибка при обработке вашего сообщения."
-                )
-            finally:
+                logger.error(f"Не удалось удалить исходное сообщение: {e}")
+
+        except Exception as e:
+            logger.error(f"Ошибка обработки сообщения: {e}")
+            try:
+                await processing_msg.delete()
+            except Exception:
                 pass
+            await message.reply_text(
+                "❌ Извините, произошла ошибка при обработке вашего сообщения."
+            )
 
     async def _process_uploaded_epub(
         self, message: Message, context: ContextTypes.DEFAULT_TYPE
@@ -232,13 +501,11 @@ class TelegramToEpub:
             safe_filename = sanitize_filename(base_name) or "document"
             send_filename = f"{safe_filename}.epub"
 
-            # Prepare caption
             forward_origin = getattr(message, "forward_origin", None)
             source_name = self.get_source_info(message)
             clean_title = strip_emojis(base_name)
             clean_source = strip_emojis(source_name)
 
-            # Link for caption
             post_link = ""
             if (
                 forward_origin
@@ -266,7 +533,6 @@ class TelegramToEpub:
                 )
             logger.info("EPUB документ отправлен пользователю.")
 
-            # Upload to Dropbox
             dropbox_success = await epub_service.process_file_to_dropbox(temp_path, file_name)
 
             if dropbox_success:
@@ -288,6 +554,24 @@ class TelegramToEpub:
                     logger.error("Не удалось удалить временный EPUB файл.")
 
 
+# ---------------------------------------------------------------------------
+# DB init on startup
+# ---------------------------------------------------------------------------
+
+
+async def _init_db_on_startup(application: Application) -> None:
+    """Ensure the SQLite channel database is initialized before the bot starts."""
+    from userbot_db import init_db
+
+    await init_db()
+    logger.info("Channel DB инициализирована")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
 def main() -> None:
     """Start the bot."""
     token = settings.TELEGRAM_BOT_TOKEN
@@ -295,19 +579,32 @@ def main() -> None:
         logger.error("TELEGRAM_BOT_TOKEN is not set")
         return
 
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token(token).build()
-
-    # Create an instance of our converter
     converter = TelegramToEpub()
 
-    # Add handlers
+    # Chain DB init → converter startup into a single post_init callback
+    async def _post_init(application: Application) -> None:
+        await _init_db_on_startup(application)
+        await converter.post_init(application)
+
+    application = (
+        Application.builder()
+        .token(token)
+        .post_init(_post_init)
+        .post_stop(converter.post_stop)
+        .build()
+    )
+
+    # Handlers
     application.add_handler(CommandHandler("start", converter.start))
     application.add_handler(CommandHandler("help", converter.help))
+    application.add_handler(CommandHandler("add_channel", converter.add_channel))
+    application.add_handler(CommandHandler("del_channel", converter.del_channel))
+    application.add_handler(CommandHandler("list_channels", converter.list_channels))
     application.add_handler(MessageHandler(filters.ALL, converter.handle_message))
 
-    # Start the Bot
     application.run_polling()
+
+
 
 
 if __name__ == "__main__":
