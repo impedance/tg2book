@@ -8,8 +8,11 @@ import json
 import logging
 import os
 import re
+from typing import Optional
 
 import requests
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +20,8 @@ _DROPBOX_FOLDER = "/Apps/Dropbox PocketBook/from-bot/"
 _TOKEN_URL = "https://api.dropbox.com/oauth2/token"
 _UPLOAD_URL = "https://content.dropboxapi.com/2/files/upload"
 
-CONNECT_TIMEOUT = 5   # seconds to establish a TCP connection
-READ_TIMEOUT = 30     # seconds to wait for the server to send data
+CONNECT_TIMEOUT = 5  # seconds to establish a TCP connection
+READ_TIMEOUT = 30  # seconds to wait for the server to send data
 
 
 def redact_access_token(text: str) -> str:
@@ -26,14 +29,14 @@ def redact_access_token(text: str) -> str:
     return re.sub(r'"access_token":\s*"[^"]+"', '"access_token": "***"', text)
 
 
-def refresh_access_token() -> str | None:
+def refresh_access_token() -> Optional[str]:
     """Obtain a short-lived access token via OAuth2 refresh-token grant.
 
     Returns the token string on success, or *None* on failure.
     """
-    refresh_token = os.getenv("DROPBOX_REFRESH_TOKEN")
-    app_key = os.getenv("DROPBOX_APP_KEY")
-    app_secret = os.getenv("DROPBOX_APP_SECRET")
+    refresh_token = settings.DROPBOX_REFRESH_TOKEN
+    app_key = settings.DROPBOX_APP_KEY
+    app_secret = settings.DROPBOX_APP_SECRET
 
     try:
         response = requests.post(
@@ -62,7 +65,7 @@ def refresh_access_token() -> str | None:
     return None
 
 
-def upload_to_dropbox(file_path: str, custom_filename: str | None = None) -> bool:
+def upload_to_dropbox(file_path: str, custom_filename: Optional[str] = None) -> bool:
     """Upload *file_path* to the configured Dropbox folder.
 
     Uses the Dropbox Content API v2 directly via HTTP — no subprocess,

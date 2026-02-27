@@ -1,25 +1,29 @@
 import asyncio
 import logging
 import os
-import re
 import shutil
 import sys
 import tempfile
+from typing import Any, List
 
-import dropbox_module
-from epub_functions import create_epub
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+
+from config import settings
+from services import epub_service
+from utils.text_utils import sanitize_filename, strip_emojis
+
 
 class HTTPRequestFilter(logging.Filter):
     def filter(self, record):
         # Фильтруем все HTTP запросы к Telegram API
         return "HTTP Request:" not in record.getMessage()
 
+
 logging.basicConfig(
     stream=sys.stdout,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.DEBUG,
 )
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -27,10 +31,11 @@ logger.setLevel(logging.DEBUG)
 # Применяем фильтр к различным логгерам, которые могут генерировать HTTP логи
 http_filter = HTTPRequestFilter()
 logger.addFilter(http_filter)
-logging.getLogger('httpx').addFilter(http_filter)
-logging.getLogger('urllib3').addFilter(http_filter)
-logging.getLogger('telegram').addFilter(http_filter)
+logging.getLogger("httpx").addFilter(http_filter)
+logging.getLogger("urllib3").addFilter(http_filter)
+logging.getLogger("telegram").addFilter(http_filter)
 logging.getLogger().addFilter(http_filter)  # Корневой логгер
+
 
 class TelegramToEpub:
     def __init__(self):
@@ -39,52 +44,34 @@ class TelegramToEpub:
 
     def __del__(self):
         try:
-            if hasattr(self, 'temp_dir') and os.path.exists(self.temp_dir):
+            if hasattr(self, "temp_dir") and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
         except Exception:
             pass
 
-    def strip_emojis(self, text: str) -> str:
-        """Removes emojis and other special characters from text."""
-        if not text:
-            return ""
-        # Match anything that is NOT a basic character (simplified regex for now)
-        # This matches common emoji ranges and some other symbols
-        clean = re.sub(r'[^\w\s\-_.,()!?:;а-яёА-ЯЁ/]', '', text)
-        # Also collapse multiple spaces
-        return re.sub(r'\s+', ' ', clean).strip()
 
-    def extract_title(self, text: str) -> str:
-        """Берёт заголовок как первый абзац (до пустой строки)."""
-        text = (text or "").strip()
-        if not text:
-            return "Untitled"
-        paragraphs = re.split(r"\n\s*\n", text, maxsplit=1)
-        title = (paragraphs[0] or "").strip()
-        return title or "Untitled"
-
-    def get_first_link(self, message) -> str:
+    def get_first_link(self, message: Message) -> str:
         """Extract the first URL from message entities or caption entities, fallback to message link."""
-        entities = message.entities or message.caption_entities or []
+        entities: List[Any] = list(message.entities or message.caption_entities or [])
         text = message.text or message.caption or ""
-        
+
         for entity in entities:
-            if entity.type == 'text_link':
-                return entity.url
-            if entity.type == 'url':
+            if entity.type == "text_link":
+                return str(entity.url)
+            if entity.type == "url":
                 offset = entity.offset
                 length = entity.length
-                return text[offset:offset+length]
-        
-        # If no link found in text, try the message link (useful for public channels)
-        return message.link or ""
+                return str(text[offset : offset + length])
 
-    def get_source_info(self, message) -> str:
+        # If no link found in text, try the message link (useful for public channels)
+        return str(message.link or "")
+
+    def get_source_info(self, message: Message) -> str:
         """Get the name of the channel or user forwarded from."""
         forward_origin = getattr(message, "forward_origin", None)
         if not forward_origin:
             return ""
-            
+
         if forward_origin.type == "chat" and forward_origin.sender_chat:
             return forward_origin.sender_chat.title or "Channel"
         elif forward_origin.type == "channel" and forward_origin.sender_chat:
@@ -93,74 +80,33 @@ class TelegramToEpub:
             return forward_origin.sender_user.full_name or "User"
         elif forward_origin.type == "hidden_user":
             return "Hidden User"
-            
+
         return "Unknown Source"
 
-    def get_message_text(self, message):
+    def get_message_text(self, message: Message) -> str:
         """Get text content from message.text or message.caption"""
         return message.text or message.caption or ""
 
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send a message when the command /start is issued."""
-        await update.message.reply_text(
-            'Привет! Я могу конвертировать сообщения из Telegram в формат EPUB. '
-            'Просто перешли мне сообщение, и я создам из него EPUB файл.'
-        )
+        if update.message:
+            await update.message.reply_text(
+                "Привет! Я могу конвертировать сообщения из Telegram в формат EPUB. "
+                "Просто перешли мне сообщение, и я создам из него EPUB файл."
+            )
 
-    async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send a message when the command /help is issued."""
-        await update.message.reply_text(
-            'Чтобы конвертировать сообщение в EPUB:\n'
-            '1. Выберите сообщение, которое хотите конвертировать\n'
-            '2. Перешлите его мне\n'
-            '3. Я создам EPUB файл и отправлю его вам'
-        )
-
-    def format_message(self, text):
-        """
-        Сохраняет структуру исходного текста, списки, абзацы.
-        Все упоминания файлов .md подчёркивает (например, _plan.md_).
-        Преобразует переносы строк в <br> и абзацы в <p> для корректного отображения в EPUB.
-        """
-        link_pattern = re.compile(r'\b[\w\-/]+\.md\b', re.IGNORECASE)
-        def underline_md(match):
-            return f"<u>{match.group(0)}</u>"
-        # Разбиваем на абзацы по двойному переносу
-        paragraphs = text.split('\n\n')
-        formatted_paragraphs = []
-        for para in paragraphs:
-            # Подчёркиваем .md-ссылки и заменяем одиночные переносы на <br>
-            para = link_pattern.sub(underline_md, para)
-            para = para.replace('\n', '<br>')
-            formatted_paragraphs.append(f'<p>{para}</p>')
-        return '\n'.join(formatted_paragraphs)
+        if update.message:
+            await update.message.reply_text(
+                "Чтобы конвертировать сообщение в EPUB:\n"
+                "1. Выберите сообщение, которое хотите конвертировать\n"
+                "2. Перешлите его мне\n"
+                "3. Я создам EPUB файл и отправлю его вам"
+            )
 
 
-    def sanitize_filename(self, title, max_words=4):
-        """Create a safe filename from post title (limited to max_words)"""
-        if not title or title == "Untitled":
-            return "message"
-        
-        # Take first line or first sentence as filename
-        clean_title = title.split('\n')[0].strip()
-        if not clean_title:
-            clean_title = title.strip()
-        
-        # Remove or replace unsafe characters
-        clean_title = re.sub(r'[^\w\s\-_а-яё]', '', clean_title, flags=re.IGNORECASE)
-        clean_title = re.sub(r'\s+', ' ', clean_title.strip())
-        
-        # Limit to max_words
-        words = clean_title.split()
-        if len(words) > max_words:
-            words = words[:max_words]
-        
-        # Join with underscores
-        clean_title = '_'.join(words)
-        
-        return clean_title if clean_title else "message"
-
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages."""
         message = update.message
         if not message:
@@ -205,77 +151,27 @@ class TelegramToEpub:
 
             processing_msg = await message.reply_text("📚 Создаю EPUB файл...")
 
-            epub_path = None
             try:
-                full_text = text_content
-                title = self.extract_title(full_text)
-                content = self.format_message(full_text)
-                safe_filename = self.sanitize_filename(title)
-                
-                # Extract metadata for summary
                 source_name = self.get_source_info(message)
-                link = self.get_first_link(message)
+                first_link = self.get_first_link(message)
 
-                # Obtain a unique path without keeping the file descriptor open,
-                # so create_epub (zipfile) can write to it without contention.
-                with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp_file:
-                    epub_path = tmp_file.name
-                epub_path = await asyncio.to_thread(
-                    create_epub, title, source_name, content, epub_path
-                )
-
-                if not os.path.exists(epub_path):
-                    logger.error(f"Файл не был создан: {epub_path}")
-                    await processing_msg.delete()
-                    await message.reply_text("❌ Ошибка создания файла")
-                    return
-
-                # Upload to Dropbox
-                logger.info(f"Инициируем загрузку в Dropbox: {epub_path}")
-                dropbox_filename = f"{safe_filename}.epub"
-                dropbox_success = False
-                try:
-                    dropbox_success = await asyncio.to_thread(
-                        dropbox_module.upload_to_dropbox, epub_path, dropbox_filename
-                    )
-                    if dropbox_success:
-                        logger.info("Загрузка в Dropbox завершена успешно")
-                    else:
-                        logger.error("Загрузка в Dropbox не удалась")
-                except Exception as e:
-                    logger.error(f"Ошибка загрузки в Dropbox: {e}")
-
-                # Prepare summary message
-                clean_title = self.strip_emojis(title)
-                clean_source = self.strip_emojis(source_name)
-                
-                # Determine the link to use: use message.link (original post) if available, 
-                # otherwise fallback to first link in text, or just bold text if no link.
+                # Determine the post link to use
                 post_link = ""
                 if forward_origin and hasattr(forward_origin, "chat") and forward_origin.chat and forward_origin.message_id:
-                    # Construct link from chat username/id and message_id
                     if forward_origin.chat.username:
                         post_link = f"https://t.me/{forward_origin.chat.username}/{forward_origin.message_id}"
-                
+
                 if not post_link:
-                    post_link = link or ""
+                    post_link = first_link
 
-                if post_link:
-                    summary_text = f'<b><a href="{post_link}">{clean_title}</a></b>'
-                else:
-                    summary_text = f'<b>{clean_title}</b>'
-
-                if clean_source and clean_source != "Unknown Source":
-                     # Add a separator if title is present
-                     if summary_text:
-                         summary_text += f" {clean_source}"
-                     else:
-                         summary_text = clean_source
+                summary_text = await epub_service.process_text_to_epub(
+                    text_content, source_name, post_link
+                )
 
                 # Send summary
                 await processing_msg.delete()
                 await message.reply_text(summary_text, disable_web_page_preview=False, parse_mode='HTML')
-                
+
                 # Delete original message
                 try:
                     await message.delete()
@@ -289,23 +185,24 @@ class TelegramToEpub:
                     await processing_msg.delete()
                 except Exception:
                     pass
-                await message.reply_text("❌ Извините, произошла ошибка при обработке вашего сообщения.")
+                await message.reply_text(
+                    "❌ Извините, произошла ошибка при обработке вашего сообщения."
+                )
             finally:
-                # Guaranteed cleanup: remove temp file regardless of success or failure
-                if epub_path and os.path.exists(epub_path):
-                    try:
-                        os.remove(epub_path)
-                    except Exception as e:
-                        logger.error(f"Ошибка удаления временного файла: {e}")
+                pass
 
-    async def _process_uploaded_epub(self, message, context):
+    async def _process_uploaded_epub(
+        self, message: Message, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Process an uploaded EPUB document and forward it back with Dropbox sync."""
         document = message.document
         if not document:
             return
 
         file_name = document.file_name or "document.epub"
-        is_epub = (document.mime_type == "application/epub+zip") or file_name.lower().endswith(".epub")
+        is_epub = (document.mime_type == "application/epub+zip") or file_name.lower().endswith(
+            ".epub"
+        )
 
         if not is_epub:
             logger.info("Получен неподдерживаемый тип документа.")
@@ -327,47 +224,50 @@ class TelegramToEpub:
             await telegram_file.download_to_drive(custom_path=temp_path)
 
             base_name = os.path.splitext(file_name)[0]
-            safe_filename = self.sanitize_filename(base_name) or "document"
+            safe_filename = sanitize_filename(base_name) or "document"
             send_filename = f"{safe_filename}.epub"
-            
+
             # Prepare caption
             forward_origin = getattr(message, "forward_origin", None)
             source_name = self.get_source_info(message)
-            clean_title = self.strip_emojis(base_name)
-            clean_source = self.strip_emojis(source_name)
-            
+            clean_title = strip_emojis(base_name)
+            clean_source = strip_emojis(source_name)
+
             # Link for caption
             post_link = ""
-            if forward_origin and hasattr(forward_origin, "chat") and forward_origin.chat and forward_origin.message_id:
+            if (
+                forward_origin
+                and hasattr(forward_origin, "chat")
+                and forward_origin.chat
+                and forward_origin.message_id
+            ):
                 if forward_origin.chat.username:
-                    post_link = f"https://t.me/{forward_origin.chat.username}/{forward_origin.message_id}"
-            
+                    post_link = (
+                        f"https://t.me/{forward_origin.chat.username}/{forward_origin.message_id}"
+                    )
+
             if post_link:
                 caption = f'<b><a href="{post_link}">{clean_title}</a></b>'
             else:
-                caption = f'<b>{clean_title}</b>'
-            
+                caption = f"<b>{clean_title}</b>"
+
             if clean_source and clean_source != "Unknown Source":
                 caption += f" {clean_source}"
 
             await processing_msg.delete()
             with open(temp_path, "rb") as epub_file:
                 await message.reply_document(
-                    document=epub_file,
-                    filename=send_filename,
-                    caption=caption,
-                    parse_mode='HTML'
+                    document=epub_file, filename=send_filename, caption=caption, parse_mode="HTML"
                 )
             logger.info("EPUB документ отправлен пользователю.")
 
-            try:
-                dropbox_filename = send_filename
-                await asyncio.to_thread(
-                    dropbox_module.upload_to_dropbox, temp_path, dropbox_filename
-                )
-                logger.info("EPUB документ загружен в Dropbox.")
-            except Exception as e:
-                logger.error(f"Ошибка при загрузке EPUB в Dropbox: {e}")
+            # Upload to Dropbox
+            dropbox_success = await epub_service.process_file_to_dropbox(temp_path, file_name)
+
+            if dropbox_success:
+                logger.info("Загрузка в Dropbox документа завершена успешно")
+            else:
+                logger.error("Загрузка в Dropbox документа не удалась")
         except Exception as e:
             logger.error(f"Ошибка обработки входящего EPUB документа: {e}")
             try:
@@ -381,17 +281,16 @@ class TelegramToEpub:
                     os.remove(temp_path)
                 except Exception:
                     logger.error("Не удалось удалить временный EPUB файл.")
-    
 
-def main():
+
+def main() -> None:
     """Start the bot."""
-    # Get the token from environment variable
-    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    token = settings.TELEGRAM_BOT_TOKEN
     if not token:
-        logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
+        logger.error("TELEGRAM_BOT_TOKEN is not set")
         return
 
-    # Create the Application and pass it your bot's token
+    # Create the Application and pass it your bot's token.
     application = Application.builder().token(token).build()
 
     # Create an instance of our converter
@@ -405,5 +304,6 @@ def main():
     # Start the Bot
     application.run_polling()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

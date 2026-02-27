@@ -5,17 +5,17 @@ Dependencies: stdlib only (zipfile, io, xml.sax.saxutils, textwrap, uuid, dateti
 No Pillow, no ebooklib, no lxml, no beautifulsoup4.
 """
 
-import io
 import textwrap
 import uuid
 import zipfile
 from datetime import datetime, timezone
+from typing import Any
 from xml.sax.saxutils import escape as xml_escape
-
 
 # ---------------------------------------------------------------------------
 # SVG cover generator
 # ---------------------------------------------------------------------------
+
 
 def _render_svg_cover(title: str, author: str) -> bytes:
     """Return an SVG book cover as UTF-8 bytes.
@@ -88,9 +88,7 @@ _CONTAINER_XML = """\
 
 def _make_opf(book_id: str, title: str, author: str, has_cover: bool) -> bytes:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    cover_meta = (
-        '<meta name="cover" content="cover-image"/>' if has_cover else ""
-    )
+    cover_meta = '<meta name="cover" content="cover-image"/>' if has_cover else ""
     cover_item = (
         '<item id="cover-image" href="cover.svg" media-type="image/svg+xml" properties="cover-image"/>'
         if has_cover
@@ -160,7 +158,7 @@ def _make_xhtml(title: str, content: str) -> bytes:
 """.encode("utf-8")
 
 
-def _build_epub_zip(dest, *, title: str, author: str, content: str) -> None:
+def _build_epub_zip(dest: Any, *, title: str, author: str, content: str) -> None:
     """Write a valid EPUB 3 archive to *dest* (file path or writable file-like object).
 
     The EPUB spec requires:
@@ -190,6 +188,7 @@ def _build_epub_zip(dest, *, title: str, author: str, content: str) -> None:
 # ---------------------------------------------------------------------------
 # Public API (kept identical to old signature for bot.py compatibility)
 # ---------------------------------------------------------------------------
+
 
 def create_epub(title: str, author: str, content: str, output_path: str) -> str:
     """Create an EPUB file at *output_path* and return the path.
