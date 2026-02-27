@@ -1,6 +1,10 @@
+import sys
 from typing import Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_is_test = "pytest" in sys.modules
 
 
 class Settings(BaseSettings):
@@ -9,10 +13,10 @@ class Settings(BaseSettings):
     Automatically loads from .env file if present.
     """
 
-    TELEGRAM_BOT_TOKEN: str
-    DROPBOX_APP_KEY: str
-    DROPBOX_APP_SECRET: str
-    DROPBOX_REFRESH_TOKEN: str
+    TELEGRAM_BOT_TOKEN: str = Field(default="test_token" if _is_test else ...)  # type: ignore
+    DROPBOX_APP_KEY: str = Field(default="test_key" if _is_test else ...)  # type: ignore
+    DROPBOX_APP_SECRET: str = Field(default="test_secret" if _is_test else ...)  # type: ignore
+    DROPBOX_REFRESH_TOKEN: str = Field(default="test_refresh" if _is_test else ...)  # type: ignore
     ADMIN_ID: Optional[int] = None
 
     model_config = SettingsConfigDict(

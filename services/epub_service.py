@@ -9,6 +9,7 @@ from utils.text_utils import extract_title, format_message, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
+
 async def process_text_to_epub(text_content: str, source_name: str, first_link: str) -> str:
     """
     Process text content:
@@ -28,9 +29,7 @@ async def process_text_to_epub(text_content: str, source_name: str, first_link: 
             epub_path = tmp_file.name
 
         # Create EPUB in a thread to not block event loop
-        epub_path = await asyncio.to_thread(
-            create_epub, title, source_name, content, epub_path
-        )
+        epub_path = await asyncio.to_thread(create_epub, title, source_name, content, epub_path)
 
         if not os.path.exists(epub_path):
             logger.error(f"Файл не был создан: {epub_path}")
@@ -41,19 +40,17 @@ async def process_text_to_epub(text_content: str, source_name: str, first_link: 
         dropbox_filename = f"{safe_filename}.epub"
 
         # Upload in a thread
-        await asyncio.to_thread(
-            dropbox_module.upload_to_dropbox, epub_path, dropbox_filename
-        )
+        await asyncio.to_thread(dropbox_module.upload_to_dropbox, epub_path, dropbox_filename)
 
         # Prepare summary text (using HTML for Telegram)
         post_link = first_link or ""
         if post_link:
             summary_text = f'<b><a href="{post_link}">{title}</a></b>'
         else:
-            summary_text = f'<b>{title}</b>'
+            summary_text = f"<b>{title}</b>"
 
         if source_name and source_name != "Unknown Source":
-             summary_text += f" {source_name}"
+            summary_text += f" {source_name}"
 
         return summary_text
 
@@ -64,6 +61,7 @@ async def process_text_to_epub(text_content: str, source_name: str, first_link: 
                 os.remove(epub_path)
             except Exception as e:
                 logger.error(f"Ошибка удаления временного файла: {e}")
+
 
 async def process_file_to_dropbox(temp_path: str, file_name: str) -> bool:
     """

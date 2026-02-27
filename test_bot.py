@@ -15,11 +15,14 @@ def _load_real_module(module_name, file_path):
     spec.loader.exec_module(mod)
     return mod
 
+
 def _load_real_dropbox_module():
     return _load_real_module("dropbox_module_real", "dropbox_module.py")
 
+
 def _load_real_text_utils():
     return _load_real_module("text_utils_real", "utils/text_utils.py")
+
 
 import io
 import sys
@@ -32,8 +35,10 @@ import pytest
 # GLOBAL MOCKS (Telegram only, as it's truly external and heavy)
 # ---------------------------------------------------------------------------
 
+
 class _MockModule:
     pass
+
 
 if "telegram" not in sys.modules:
     _telegram_mock = _MockModule()
@@ -61,17 +66,20 @@ from epub_functions import _build_epub_zip, _render_svg_cover
 # Unit Tests
 # ===========================================================================
 
+
 class TestSvgCover:
     def test_returns_bytes(self):
         svg = _render_svg_cover("My Title", "My Author")
         assert isinstance(svg, bytes)
         assert b"<svg" in svg
 
+
 class TestBuildEpubZip:
     def test_result_is_valid_zip(self):
         buf = io.BytesIO()
         _build_epub_zip(buf, title="T", author="A", content="C")
         assert zipfile.is_zipfile(io.BytesIO(buf.getvalue()))
+
 
 class TestTelegramToEpub:
     @pytest.fixture

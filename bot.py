@@ -49,7 +49,6 @@ class TelegramToEpub:
         except Exception:
             pass
 
-
     def get_first_link(self, message: Message) -> str:
         """Extract the first URL from message entities or caption entities, fallback to message link."""
         entities: List[Any] = list(message.entities or message.caption_entities or [])
@@ -72,11 +71,11 @@ class TelegramToEpub:
         if not forward_origin:
             return ""
 
-        if forward_origin.type == "chat" and forward_origin.sender_chat:
+        if forward_origin.type == "chat" and getattr(forward_origin, "sender_chat", None):
             return forward_origin.sender_chat.title or "Channel"
-        elif forward_origin.type == "channel" and forward_origin.sender_chat:
-            return forward_origin.sender_chat.title or "Channel"
-        elif forward_origin.type == "user" and forward_origin.sender_user:
+        elif forward_origin.type == "channel" and getattr(forward_origin, "chat", None):
+            return forward_origin.chat.title or "Channel"
+        elif forward_origin.type == "user" and getattr(forward_origin, "sender_user", None):
             return forward_origin.sender_user.full_name or "User"
         elif forward_origin.type == "hidden_user":
             return "Hidden User"
@@ -104,7 +103,6 @@ class TelegramToEpub:
                 "2. Перешлите его мне\n"
                 "3. Я создам EPUB файл и отправлю его вам"
             )
-
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages."""
@@ -157,7 +155,12 @@ class TelegramToEpub:
 
                 # Determine the post link to use
                 post_link = ""
-                if forward_origin and hasattr(forward_origin, "chat") and forward_origin.chat and forward_origin.message_id:
+                if (
+                    forward_origin
+                    and hasattr(forward_origin, "chat")
+                    and forward_origin.chat
+                    and forward_origin.message_id
+                ):
                     if forward_origin.chat.username:
                         post_link = f"https://t.me/{forward_origin.chat.username}/{forward_origin.message_id}"
 
@@ -170,7 +173,9 @@ class TelegramToEpub:
 
                 # Send summary
                 await processing_msg.delete()
-                await message.reply_text(summary_text, disable_web_page_preview=False, parse_mode='HTML')
+                await message.reply_text(
+                    summary_text, disable_web_page_preview=False, parse_mode="HTML"
+                )
 
                 # Delete original message
                 try:

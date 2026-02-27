@@ -11,6 +11,7 @@ def strip_emojis(text: str) -> str:
     # Also collapse multiple spaces
     return re.sub(r"\s+", " ", clean).strip()
 
+
 def extract_title(text: Optional[str]) -> str:
     """Берёт заголовок как первый абзац (до пустой строки)."""
     text = (text or "").strip()
@@ -19,6 +20,7 @@ def extract_title(text: Optional[str]) -> str:
     paragraphs = re.split(r"\n\s*\n", text, maxsplit=1)
     title = (paragraphs[0] or "").strip()
     return title or "Untitled"
+
 
 def sanitize_filename(title: str, max_words: int = 4) -> str:
     """Create a safe filename from post title (limited to max_words)"""
@@ -43,6 +45,7 @@ def sanitize_filename(title: str, max_words: int = 4) -> str:
     clean_title = "_".join(words)
 
     return clean_title if clean_title else "message"
+
 
 def format_message(text: str) -> str:
     """
