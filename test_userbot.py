@@ -239,28 +239,34 @@ async def test_channel_worker_processes_item():
 
 
 @pytest.mark.asyncio
-async def test_handle_channel_message_skips_unknown_channel(tmp_path):
-    """Messages from channels not in DB should be silently ignored."""
+async def test_handle_channel_message_enqueues_when_called_directly(tmp_path):
+    """
+    _handle_channel_message trusts the upstream Pyrogram filter and enqueues
+    any message that reaches it. Filtering by channel membership is now done
+    exclusively by the custom Pyrogram filter (tested in tests/test_userbot_filters.py).
+    """
     import userbot_db
 
     original_path = userbot_db.DB_PATH
     userbot_db.DB_PATH = tmp_path / "test.sqlite"
     await userbot_db.init_db()
-    # No channels added
 
     converter = TelegramToEpub()
 
     pyro_msg = MagicMock()
-    pyro_msg.chat.username = "unknownchannel"
-    pyro_msg.chat.title = "Unknown"
+    pyro_msg.chat.username = "somechannel"
+    pyro_msg.chat.title = "Some Channel"
+    pyro_msg.chat.id = -1009999999
     pyro_msg.text = "Some text"
     pyro_msg.caption = None
+    pyro_msg.id = 1
 
     with patch("bot.settings") as mock_settings:
         mock_settings.ADMIN_ID = 42
         await converter._handle_channel_message(pyro_msg, MagicMock())
 
-    assert converter.processing_queue.empty()
+    # Handler enqueues unconditionally — filtering is the filter's job
+    assert converter.processing_queue.qsize() == 1
 
     userbot_db.DB_PATH = original_path
 

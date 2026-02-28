@@ -97,6 +97,8 @@ class TelegramToEpub:
         self._worker_task: Optional[asyncio.Task] = None
         self._sync_task: Optional[asyncio.Task] = None
         self._userbot: Optional[Any] = None  # Pyrogram Client or None
+        # In-memory cache of monitored channels — avoid per-message DB hits
+        self._monitored_channels_cache: dict = {"usernames": set(), "ids": set()}
 
     def __del__(self):
         try:
@@ -114,6 +116,9 @@ class TelegramToEpub:
         # Start queue worker
         self._worker_task = asyncio.create_task(self._channel_worker())
         logger.info("Queue worker started")
+
+        # Load monitored channels cache from DB
+        await self._load_channels_cache()
 
         # Start Pyrogram userbot if credentials are configured
         if _pyrogram_available and settings.API_ID and settings.API_HASH:
@@ -154,6 +159,48 @@ class TelegramToEpub:
                 logger.error(f"Ошибка при остановке юзербота: {e}")
 
     # ------------------------------------------------------------------
+    # In-memory cache helpers
+    # ------------------------------------------------------------------
+
+    async def _load_channels_cache(self) -> None:
+        """Load monitored channels from DB into in-memory sets (called once on startup)."""
+        from userbot_db import get_channels
+
+        try:
+            channels = await get_channels()
+            usernames: set = set()
+            ids: set = set()
+            for ch in channels:
+                ch_norm = ch.lstrip("@").lower()
+                # Numeric IDs start with '-' (e.g. "-100123456") or are all digits
+                if ch_norm.lstrip("-").isdigit():
+                    ids.add(ch_norm)
+                else:
+                    usernames.add(ch_norm)
+            self._monitored_channels_cache = {"usernames": usernames, "ids": ids}
+            logger.info(
+                f"Кэш каналов загружен: {len(usernames)} username(s), {len(ids)} id(s)"
+            )
+        except Exception as e:
+            logger.error(f"Не удалось загрузить кэш каналов из БД: {e}. Отслеживание отключено до перезапуска.")
+            self._monitored_channels_cache = {"usernames": set(), "ids": set()}
+
+    def _make_monitored_filter(self) -> Any:
+        """Return a Pyrogram filter that passes only messages from monitored channels."""
+        cache = self._monitored_channels_cache
+
+        def _is_monitored(_, __, message) -> bool:  # type: ignore[return]
+            chat = getattr(message, "chat", None)
+            if chat is None:
+                return False
+            chat_id = str(getattr(chat, "id", ""))
+            username = getattr(chat, "username", None)
+            username_lc = username.lower() if username else ""
+            return chat_id in cache["ids"] or username_lc in cache["usernames"]
+
+        return pyro_filters.create(_is_monitored)
+
+    # ------------------------------------------------------------------
     # Pyrogram userbot
     # ------------------------------------------------------------------
 
@@ -184,18 +231,10 @@ class TelegramToEpub:
                 no_updates=False,
             )
 
-        @self._userbot.on_message()
-        @self._userbot.on_edited_message()
-        async def _log_all_messages(client, message):
-            chat_title = message.chat.title if message.chat else "Private"
-            chat_type = message.chat.type if message.chat else "Unknown"
-            logger.debug(f"🔍 Юзербот видит сообщение в [{chat_type}] {chat_title}")
-            # continue processing by falling through to other handlers
-            message.continue_propagation()
-
-        # Register the channel message handler on the Pyrogram client
-        @self._userbot.on_message(pyro_filters.channel | pyro_filters.group)
-        @self._userbot.on_edited_message(pyro_filters.channel | pyro_filters.group)
+        # Register the channel message handler — filtered to monitored channels only
+        monitored_filter = self._make_monitored_filter()
+        @self._userbot.on_message(pyro_filters.channel & monitored_filter)
+        @self._userbot.on_edited_message(pyro_filters.channel & monitored_filter)
         async def _on_channel_message(client, message):
             await self._handle_channel_message(message, application.bot)
 
@@ -232,49 +271,10 @@ class TelegramToEpub:
     # ------------------------------------------------------------------
 
     async def _handle_channel_message(self, pyro_message: Any, ptb_bot: Any) -> None:
-        """Called by Pyrogram when a new message arrives in any channel."""
-        from userbot_db import get_channels
-
-        # Check if this channel is in our watchlist
-        channels = await get_channels()
-        
-        chat_username = (pyro_message.chat.username or "").lower()
-        chat_id = str(pyro_message.chat.id)
-        chat_title = pyro_message.chat.title or "Unknown"
-        
-        logger.debug(
-            f"📥 Юзербот поймал сообщение из канала:\n"
-            f"   Название: {chat_title}\n"
-            f"   Username: @{chat_username}\n"
-            f"   ID: {chat_id}\n"
-            f"   Текст/капча есть: {bool(pyro_message.text or pyro_message.caption)}\n"
-            f"   База отслеживаемых: {channels}"
-        )
-
-        # A channel matches if any of the following is found in the DB:
-        # 1. The exact username (without @, lowercased)
-        # 2. The exact chat ID (e.g. "-100123456")
-        # 3. An invite link (we check if it's in the DB, though invite links don't match username/id easily.
-        #    Actually, if they added an invite link, we might not know the mapping unless we joined via it.
-        #    For now, let's at least compare username and ID.
-        
-        is_monitored = False
-        for ch in channels:
-            ch_lower = ch.lower()
-            if chat_username and chat_username == ch_lower:
-                is_monitored = True
-                break
-            if chat_id == ch_lower:
-                is_monitored = True
-                break
-            # Quick hack: if the user added "https://t.me/chat_username", match the username part
-            if chat_username and chat_username in ch_lower:
-                is_monitored = True
-                break
-                
-        if not is_monitored:
-            logger.debug(f"⏭️ Канал '{chat_title}' (id={chat_id}) не отслеживается, пропускаем.")
-            return
+        """Called by Pyrogram when a message arrives in a monitored channel (pre-filtered)."""
+        chat_username = getattr(pyro_message.chat, "username", None) or ""
+        chat_id = str(getattr(pyro_message.chat, "id", ""))
+        chat_title = getattr(pyro_message.chat, "title", None) or chat_username or "Unknown"
 
         text = pyro_message.text or pyro_message.caption or ""
         if not text:
@@ -286,12 +286,8 @@ class TelegramToEpub:
             logger.warning("ADMIN_ID не задан. Некуда отправить результат из канала.")
             return
 
-        source_name = pyro_message.chat.title or chat_username
-        post_link = ""
-        if pyro_message.chat.username:
-            post_link = (
-                f"https://t.me/{pyro_message.chat.username}/{pyro_message.id}"
-            )
+        source_name = chat_title
+        post_link = f"https://t.me/{chat_username}/{pyro_message.id}" if chat_username else ""
 
         item = _QueueItem(
             text=text,
@@ -302,7 +298,7 @@ class TelegramToEpub:
         )
         await self.processing_queue.put(item)
         logger.info(
-            f"Сообщение из @{chat_username} помещено в очередь (size={self.processing_queue.qsize()})"
+            f"📥 Добавлено в очередь: {chat_title} (id={chat_id}), размер очереди={self.processing_queue.qsize()}"
         )
 
     # ------------------------------------------------------------------
@@ -429,6 +425,11 @@ class TelegramToEpub:
         username = context.args[0].lstrip("@").lower()
         added = await db_add_channel(username)
         if added:
+            # Sync in-memory cache — transactional: only after confirmed DB write
+            if username.lstrip("-").isdigit():
+                self._monitored_channels_cache["ids"].add(username)
+            else:
+                self._monitored_channels_cache["usernames"].add(username)
             await update.message.reply_text(f"✅ Канал @{username} добавлен в список отслеживания.")
         else:
             await update.message.reply_text(f"ℹ️ Канал @{username} уже в списке.")
@@ -450,6 +451,11 @@ class TelegramToEpub:
         username = context.args[0].lstrip("@").lower()
         removed = await db_remove_channel(username)
         if removed:
+            # Sync in-memory cache — transactional: only after confirmed DB write
+            if username.lstrip("-").isdigit():
+                self._monitored_channels_cache["ids"].discard(username)
+            else:
+                self._monitored_channels_cache["usernames"].discard(username)
             await update.message.reply_text(f"✅ Канал @{username} удалён из списка.")
         else:
             await update.message.reply_text(f"ℹ️ Канал @{username} не найден в списке.")
