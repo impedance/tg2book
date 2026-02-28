@@ -294,3 +294,49 @@ async def test_handle_channel_message_enqueues_known_channel(tmp_path):
     assert queued.reply_chat_id == 42
 
     userbot_db.DB_PATH = original_path
+
+
+# ===========================================================================
+# Black-box test: userbot startup caches dialogs (anti-fragility guard)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_userbot_starts_and_fetches_dialogs():
+    """
+    [Black-box test] Убедиться, что при запуске юзербота вызывается get_dialogs(),
+    чтобы кэшировать peer_id и избежать 'ValueError: Peer id invalid'.
+    """
+    get_dialogs_called = False
+
+    async def mock_get_dialogs():
+        nonlocal get_dialogs_called
+        get_dialogs_called = True
+        yield MagicMock(chat=MagicMock(id=-100123456))
+
+    with patch("bot.PyrogramClient") as MockClient:
+        mock_instance = MagicMock()
+        MockClient.return_value = mock_instance
+        mock_instance.start = AsyncMock()
+        mock_instance.get_me = AsyncMock(return_value=MagicMock(username="test", id=1))
+        mock_instance.stop = AsyncMock()
+        mock_instance.get_dialogs = mock_get_dialogs
+        mock_instance.on_message = MagicMock(return_value=lambda f: f)
+        mock_instance.on_edited_message = MagicMock(return_value=lambda f: f)
+
+        converter = TelegramToEpub()
+        app_mock = MagicMock()
+
+        with patch("bot.settings") as mock_settings:
+            mock_settings.API_ID = "123"
+            mock_settings.API_HASH = "abc"
+            mock_settings.USERBOT_SESSION_STRING = ""
+
+            await converter._start_userbot(app_mock)
+
+            mock_instance.start.assert_awaited_once()
+            mock_instance.get_me.assert_awaited_once()
+            assert get_dialogs_called, (
+                "get_dialogs() должен вызываться при старте юзербота "
+                "для предотвращения 'ValueError: Peer id invalid'"
+            )

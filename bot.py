@@ -95,6 +95,7 @@ class TelegramToEpub:
         # Producer-Consumer queue: capacity = unlimited, concurrency enforced by single worker
         self.processing_queue: asyncio.Queue = asyncio.Queue()
         self._worker_task: Optional[asyncio.Task] = None
+        self._sync_task: Optional[asyncio.Task] = None
         self._userbot: Optional[Any] = None  # Pyrogram Client or None
 
     def __del__(self):
@@ -117,6 +118,8 @@ class TelegramToEpub:
         # Start Pyrogram userbot if credentials are configured
         if _pyrogram_available and settings.API_ID and settings.API_HASH:
             await self._start_userbot(application)
+            if self._userbot:
+                self._sync_task = asyncio.create_task(self._dialogs_sync_worker())
         else:
             logger.info(
                 "Userbot не настроен (API_ID / API_HASH отсутствуют). "
@@ -133,6 +136,14 @@ class TelegramToEpub:
             except asyncio.CancelledError:
                 pass
         logger.info("Queue worker stopped")
+
+        # Stop dialogs sync worker
+        if self._sync_task and not self._sync_task.done():
+            self._sync_task.cancel()
+            try:
+                await self._sync_task
+            except asyncio.CancelledError:
+                pass
 
         # Stop Pyrogram userbot
         if self._userbot:
@@ -191,6 +202,30 @@ class TelegramToEpub:
         await self._userbot.start()
         me = await self._userbot.get_me()
         logger.info(f"Pyrogram userbot запущен как @{me.username} (id={me.id})")
+
+        # Принудительно кэшируем все диалоги, чтобы избежать ошибки "Peer id invalid"
+        try:
+            async for _ in self._userbot.get_dialogs():
+                pass
+            logger.info("Кэш диалогов юзербота успешно обновлен.")
+        except Exception as e:
+            logger.warning(f"Не удалось обновить кэш диалогов при старте: {e}")
+
+    # ------------------------------------------------------------------
+    # Dialogs background sync worker
+    # ------------------------------------------------------------------
+
+    async def _dialogs_sync_worker(self) -> None:
+        """Фоновая задача для периодического обновления кэша диалогов."""
+        while True:
+            await asyncio.sleep(3600)  # Спим 1 час
+            if self._userbot:
+                try:
+                    async for _ in self._userbot.get_dialogs():
+                        pass
+                    logger.debug("Фоновое обновление кэша диалогов завершено.")
+                except Exception as e:
+                    logger.debug(f"Ошибка при фоновом обновлении диалогов: {e}")
 
     # ------------------------------------------------------------------
     # Channel message handler (Pyrogram)
