@@ -1,5 +1,11 @@
+VENV = .venv
+PYTHON = $(VENV)/bin/python
+
 run:
 	docker compose restart tg2book
+
+login-userbot:
+	$(PYTHON) login_userbot.py
 
 test:
 	docker compose exec tg2book python -m pytest

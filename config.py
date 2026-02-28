@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     ADMIN_ID: Optional[int] = None
     API_ID: Optional[int] = None
     API_HASH: Optional[str] = None
+    USERBOT_SESSION_STRING: Optional[str] = None
 
     @field_validator("ADMIN_ID", "API_ID", mode="before")
     @classmethod

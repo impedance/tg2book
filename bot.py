@@ -146,13 +146,23 @@ class TelegramToEpub:
         data_dir.mkdir(parents=True, exist_ok=True)
         session_name = str(data_dir / "userbot")
 
-        self._userbot = PyrogramClient(
-            session_name,
-            api_id=settings.API_ID,
-            api_hash=settings.API_HASH,
-            # Don't let Pyrogram install its own signal handlers — PTB owns the loop
-            no_updates=False,
-        )
+        if settings.USERBOT_SESSION_STRING:
+            logger.info("Используем USERBOT_SESSION_STRING для авторизации")
+            self._userbot = PyrogramClient(
+                "userbot_session",
+                session_string=settings.USERBOT_SESSION_STRING,
+                api_id=settings.API_ID,
+                api_hash=settings.API_HASH,
+                no_updates=False,
+            )
+        else:
+            logger.info(f"Используем файл сессии: {session_name}.session")
+            self._userbot = PyrogramClient(
+                session_name,
+                api_id=settings.API_ID,
+                api_hash=settings.API_HASH,
+                no_updates=False,
+            )
 
         # Register the channel message handler on the Pyrogram client
         @self._userbot.on_message(pyro_filters.channel)
