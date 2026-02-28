@@ -5,7 +5,7 @@ Plan reference: docs/userbot_filtering_plan.md
 
 Strategy:
   - The cache is populated via _load_channels_cache() and mutated by
-    add_channel / del_channel (the same code paths the real bot uses).
+    cmd_add_channel / cmd_del_channel (the same code paths the real bot uses).
   - The filter function itself is extracted by patching pyro_filters.create
     to be an identity (lambda f: f), so we get the raw Python predicate back
     and can call it directly in assertions.
@@ -26,28 +26,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 # ---------------------------------------------------------------------------
-# Stub out heavy optional dependencies before importing bot
+# Stub out Pyrogram before importing bot (no real connection needed)
 # ---------------------------------------------------------------------------
 
 
 class _MockModule:
     pass
 
-
-if "telegram" not in sys.modules:
-    _tg = _MockModule()
-    _tg.Update = MagicMock
-    _tg.Message = MagicMock
-    _tg_ext = _MockModule()
-    _tg_ext.Application = MagicMock
-    _tg_ext.CommandHandler = MagicMock
-    _tg_ext.MessageHandler = MagicMock
-    _tg_ext.ContextTypes = MagicMock
-    _tg_ext.ContextTypes.DEFAULT_TYPE = MagicMock
-    _tg_ext.filters = MagicMock()
-    _tg_ext.filters.ALL = MagicMock()
-    sys.modules["telegram"] = _tg
-    sys.modules["telegram.ext"] = _tg_ext
 
 if "pyrogram" not in sys.modules:
     _pyro = _MockModule()
@@ -94,7 +79,6 @@ def _get_filter_func(converter: TelegramToEpub):
     """
     import bot as _bot_module
 
-    # Temporarily replace pyro_filters.create with identity
     real_create = _bot_module.pyro_filters.create
     _bot_module.pyro_filters.create = lambda f: f
     try:
@@ -103,19 +87,13 @@ def _get_filter_func(converter: TelegramToEpub):
         _bot_module.pyro_filters.create = real_create
 
 
-def _make_update(user_id: int = 42):
-    update = MagicMock()
-    update.message = MagicMock()
-    update.message.from_user = MagicMock()
-    update.message.from_user.id = user_id
-    update.message.reply_text = AsyncMock()
-    return update
-
-
-def _make_context(args=None):
-    ctx = MagicMock()
-    ctx.args = args or []
-    return ctx
+def _make_message(user_id: int = 42):
+    msg = MagicMock()
+    msg.from_user = MagicMock()
+    msg.from_user.id = user_id
+    msg.reply = AsyncMock()
+    msg.command = []
+    return msg
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +123,6 @@ async def test_filter_rejects_unknown_channel(tmp_path):
     # Filter must return False
     assert filt(None, None, msg) is False
 
-    # handler is only called by Pyrogram when filter passes; calling directly
-    # should still skip adding to queue when ADMIN_ID is set but text is present —
-    # BUT in the new design the handler trusts the filter. Let's verify via filter only.
     assert converter.processing_queue.empty()
 
     userbot_db.DB_PATH = original_path
@@ -175,24 +150,26 @@ async def test_filter_accepts_after_add_channel(tmp_path):
     await converter._load_channels_cache()
 
     # Admin adds channel via command
-    update = _make_update(user_id=42)
-    context = _make_context(args=["@testchannel"])
+    msg = _make_message(user_id=42)
+    msg.command = ["add_channel", "@testchannel"]
+    client = MagicMock()
+
     with patch("bot.settings") as s:
         s.ADMIN_ID = 42
-        await converter.add_channel(update, context)
+        await converter.cmd_add_channel(client, msg)
 
-    call_text = update.message.reply_text.call_args[0][0]
+    call_text = msg.reply.call_args[0][0]
     assert "✅" in call_text
 
     # Filter must now return True (cache updated in-place)
     filt = _get_filter_func(converter)
-    msg = _make_pyro_message(chat_id=-100111222, username="testchannel", text="First post!")
-    assert filt(None, None, msg) is True
+    pyro_msg = _make_pyro_message(chat_id=-100111222, username="testchannel", text="First post!")
+    assert filt(None, None, pyro_msg) is True
 
     # Handler should enqueue the message
     with patch("bot.settings") as s:
         s.ADMIN_ID = 42
-        await converter._handle_channel_message(msg, MagicMock())
+        await converter._handle_channel_message(pyro_msg, MagicMock())
 
     assert converter.processing_queue.qsize() == 1
     item = converter.processing_queue.get_nowait()
@@ -223,23 +200,25 @@ async def test_filter_rejects_after_del_channel(tmp_path):
     await converter._load_channels_cache()  # cache has "testchannel"
 
     filt = _get_filter_func(converter)
-    msg = _make_pyro_message(chat_id=-100333444, username="testchannel", text="before")
+    pyro_msg = _make_pyro_message(chat_id=-100333444, username="testchannel", text="before")
 
     # Sanity: passes before deletion
-    assert filt(None, None, msg) is True
+    assert filt(None, None, pyro_msg) is True
 
     # Admin removes the channel
-    update = _make_update(user_id=42)
-    context = _make_context(args=["@testchannel"])
+    msg = _make_message(user_id=42)
+    msg.command = ["del_channel", "@testchannel"]
+    client = MagicMock()
+
     with patch("bot.settings") as s:
         s.ADMIN_ID = 42
-        await converter.del_channel(update, context)
+        await converter.cmd_del_channel(client, msg)
 
-    call_text = update.message.reply_text.call_args[0][0]
+    call_text = msg.reply.call_args[0][0]
     assert "✅" in call_text
 
     # Filter must now return False (cache modified in-place; same filt object)
-    assert filt(None, None, msg) is False
+    assert filt(None, None, pyro_msg) is False
 
     # Queue must remain empty
     assert converter.processing_queue.empty()

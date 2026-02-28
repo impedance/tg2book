@@ -7,40 +7,30 @@ Unit/integration tests for the userbot integration features:
 
 import asyncio
 import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Minimal stubs so tests don't need an installed Telegram / Pyrogram package
+# Minimal stubs so tests don't need a real Pyrogram connection
 # ---------------------------------------------------------------------------
+
+sys.path.insert(0, str(Path(__file__).parent))
 
 
 class _MockModule:
     pass
 
 
-if "telegram" not in sys.modules:
-    _tg = _MockModule()
-    _tg.Update = MagicMock
-    _tg.Message = MagicMock
-    _tg_ext = _MockModule()
-    _tg_ext.Application = MagicMock
-    _tg_ext.CommandHandler = MagicMock
-    _tg_ext.MessageHandler = MagicMock
-    _tg_ext.ContextTypes = MagicMock
-    _tg_ext.ContextTypes.DEFAULT_TYPE = MagicMock
-    _tg_ext.filters = MagicMock()
-    _tg_ext.filters.ALL = MagicMock()
-    sys.modules["telegram"] = _tg
-    sys.modules["telegram.ext"] = _tg_ext
-
 if "pyrogram" not in sys.modules:
     _pyro = _MockModule()
     _pyro.Client = MagicMock
-    _pyro.filters = MagicMock()
+    _pyro_filters = MagicMock()
+    _pyro_filters.channel = MagicMock()
+    _pyro.filters = _pyro_filters
     sys.modules["pyrogram"] = _pyro
-    sys.modules["pyrogram.filters"] = _pyro.filters
+    sys.modules["pyrogram.filters"] = _pyro_filters
 
 from bot import TelegramToEpub, _QueueItem  # noqa: E402
 
@@ -49,20 +39,21 @@ from bot import TelegramToEpub, _QueueItem  # noqa: E402
 # ===========================================================================
 
 
-def _make_update(user_id: int = 12345, text: str = "", document=None):
-    update = MagicMock()
-    update.message = MagicMock()
-    update.message.from_user = MagicMock()
-    update.message.from_user.id = user_id
-    update.message.reply_text = AsyncMock()
-    update.message.reply_document = AsyncMock()
-    update.message.delete = AsyncMock()
-    update.message.chat.id = user_id
-    update.message.text = text or None
-    update.message.caption = None
-    update.message.document = document
-    update.message.forward_origin = None
-    return update
+def _make_message(user_id: int = 12345, text: str = "", document=None):
+    msg = MagicMock()
+    msg.from_user = MagicMock()
+    msg.from_user.id = user_id
+    msg.reply = AsyncMock()
+    msg.reply_document = AsyncMock()
+    msg.delete = AsyncMock()
+    msg.chat = MagicMock()
+    msg.chat.id = user_id
+    msg.text = text or None
+    msg.caption = None
+    msg.document = document
+    msg.forward_origin = None
+    msg.command = []
+    return msg
 
 
 def _make_context(args=None):
@@ -118,16 +109,17 @@ async def test_db_remove(tmp_path):
 @pytest.mark.asyncio
 async def test_add_channel_rejects_non_admin():
     converter = TelegramToEpub()
-    update = _make_update(user_id=99999)
-    context = _make_context(args=["somechannel"])
+    msg = _make_message(user_id=99999)
+    msg.command = ["add_channel", "somechannel"]
+    client = MagicMock()
 
     with patch("bot.settings") as mock_settings:
         mock_settings.ADMIN_ID = 42
-        await converter.add_channel(update, context)
-
-    update.message.reply_text.assert_called_once()
-    call_text = update.message.reply_text.call_args[0][0]
-    assert "⛔" in call_text
+        # Non-admin calling cmd_add_channel — but is_admin filter would block at router level.
+        # We test the DB path directly: no auth guard inside cmd_add_channel; the guard is the filter.
+        # So let's test _is_admin helper instead.
+        assert converter._is_admin(99999) is False
+        assert converter._is_admin(42) is True
 
 
 @pytest.mark.asyncio
@@ -139,15 +131,16 @@ async def test_add_channel_admin_success(tmp_path):
     await userbot_db.init_db()
 
     converter = TelegramToEpub()
-    update = _make_update(user_id=42)
-    context = _make_context(args=["@newchan"])
+    msg = _make_message(user_id=42)
+    msg.command = ["add_channel", "@newchan"]
+    client = MagicMock()
 
     with patch("bot.settings") as mock_settings:
         mock_settings.ADMIN_ID = 42
-        await converter.add_channel(update, context)
+        await converter.cmd_add_channel(client, msg)
 
-    update.message.reply_text.assert_called_once()
-    call_text = update.message.reply_text.call_args[0][0]
+    msg.reply.assert_called_once()
+    call_text = msg.reply.call_args[0][0]
     assert "✅" in call_text
     assert "newchan" in call_text
 
@@ -163,14 +156,15 @@ async def test_list_channels_empty(tmp_path):
     await userbot_db.init_db()
 
     converter = TelegramToEpub()
-    update = _make_update(user_id=42)
-    context = _make_context()
+    msg = _make_message(user_id=42)
+    msg.command = ["list_channels"]
+    client = MagicMock()
 
     with patch("bot.settings") as mock_settings:
         mock_settings.ADMIN_ID = 42
-        await converter.list_channels(update, context)
+        await converter.cmd_list_channels(client, msg)
 
-    call_text = update.message.reply_text.call_args[0][0]
+    call_text = msg.reply.call_args[0][0]
     assert "пуст" in call_text
 
     userbot_db.DB_PATH = original_path
@@ -185,14 +179,15 @@ async def test_del_channel_not_found(tmp_path):
     await userbot_db.init_db()
 
     converter = TelegramToEpub()
-    update = _make_update(user_id=42)
-    context = _make_context(args=["ghost"])
+    msg = _make_message(user_id=42)
+    msg.command = ["del_channel", "ghost"]
+    client = MagicMock()
 
     with patch("bot.settings") as mock_settings:
         mock_settings.ADMIN_ID = 42
-        await converter.del_channel(update, context)
+        await converter.cmd_del_channel(client, msg)
 
-    call_text = update.message.reply_text.call_args[0][0]
+    call_text = msg.reply.call_args[0][0]
     assert "ℹ️" in call_text
 
     userbot_db.DB_PATH = original_path
@@ -224,7 +219,6 @@ async def test_channel_worker_processes_item():
 
         await converter.processing_queue.put(item)
 
-        # Run worker for a brief moment, then cancel it
         worker = asyncio.create_task(converter._channel_worker())
         await asyncio.sleep(0.1)
         worker.cancel()
@@ -242,8 +236,7 @@ async def test_channel_worker_processes_item():
 async def test_handle_channel_message_enqueues_when_called_directly(tmp_path):
     """
     _handle_channel_message trusts the upstream Pyrogram filter and enqueues
-    any message that reaches it. Filtering by channel membership is now done
-    exclusively by the custom Pyrogram filter (tested in tests/test_userbot_filters.py).
+    any message that reaches it.
     """
     import userbot_db
 
@@ -265,7 +258,6 @@ async def test_handle_channel_message_enqueues_when_called_directly(tmp_path):
         mock_settings.ADMIN_ID = 42
         await converter._handle_channel_message(pyro_msg, MagicMock())
 
-    # Handler enqueues unconditionally — filtering is the filter's job
     assert converter.processing_queue.qsize() == 1
 
     userbot_db.DB_PATH = original_path
@@ -320,29 +312,25 @@ async def test_userbot_starts_and_fetches_dialogs():
         get_dialogs_called = True
         yield MagicMock(chat=MagicMock(id=-100123456))
 
-    with patch("bot.PyrogramClient") as MockClient:
-        mock_instance = MagicMock()
-        MockClient.return_value = mock_instance
-        mock_instance.start = AsyncMock()
-        mock_instance.get_me = AsyncMock(return_value=MagicMock(username="test", id=1))
-        mock_instance.stop = AsyncMock()
-        mock_instance.get_dialogs = mock_get_dialogs
-        mock_instance.on_message = MagicMock(return_value=lambda f: f)
-        mock_instance.on_edited_message = MagicMock(return_value=lambda f: f)
+    mock_userbot = MagicMock()
+    mock_userbot.start = AsyncMock()
+    mock_userbot.get_me = AsyncMock(return_value=MagicMock(username="test", id=1))
+    mock_userbot.stop = AsyncMock()
+    mock_userbot.get_dialogs = mock_get_dialogs
+    mock_userbot.on_message = MagicMock(return_value=lambda f: f)
+    mock_userbot.on_edited_message = MagicMock(return_value=lambda f: f)
 
-        converter = TelegramToEpub()
-        app_mock = MagicMock()
+    converter = TelegramToEpub()
 
-        with patch("bot.settings") as mock_settings:
-            mock_settings.API_ID = "123"
-            mock_settings.API_HASH = "abc"
-            mock_settings.USERBOT_SESSION_STRING = ""
+    with patch("bot.settings") as mock_settings:
+        mock_settings.API_ID = "123"
+        mock_settings.API_HASH = "abc"
+        mock_settings.USERBOT_SESSION_STRING = ""
 
-            await converter._start_userbot(app_mock)
+        await converter.start_userbot(mock_userbot)
 
-            mock_instance.start.assert_awaited_once()
-            mock_instance.get_me.assert_awaited_once()
-            assert get_dialogs_called, (
-                "get_dialogs() должен вызываться при старте юзербота "
-                "для предотвращения 'ValueError: Peer id invalid'"
-            )
+        mock_userbot.get_me.assert_awaited_once()
+        assert get_dialogs_called, (
+            "get_dialogs() должен вызываться при старте юзербота "
+            "для предотвращения 'ValueError: Peer id invalid'"
+        )

@@ -17,6 +17,9 @@ async def init_db() -> None:
     """Create the channels table if it does not exist yet."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
+        # Оптимизация I/O: WAL-режим снижает задержки и предотвращает "database is locked"
+        await db.execute("PRAGMA journal_mode=WAL;")
+        await db.execute("PRAGMA synchronous=NORMAL;")
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS channels (
