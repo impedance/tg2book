@@ -44,13 +44,15 @@ async def process_text_to_epub(text_content: str, source_name: str, first_link: 
 
         # Prepare summary text (using HTML for Telegram)
         post_link = first_link or ""
+        
+        summary_text = f"✅ <b>Сохранено в Dropbox:</b>\n"
         if post_link:
-            summary_text = f'<b><a href="{post_link}">{title}</a></b>'
+            summary_text += f'📖 <a href="{post_link}">{title}</a>'
         else:
-            summary_text = f"<b>{title}</b>"
+            summary_text += f"📖 <b>{title}</b>"
 
         if source_name and source_name != "Unknown Source":
-            summary_text += f" {source_name}"
+            summary_text += f"\n📢 Из: <i>{source_name}</i>"
 
         return summary_text
 

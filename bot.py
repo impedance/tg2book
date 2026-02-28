@@ -595,6 +595,19 @@ def main() -> None:
     async def _post_init(application: Application) -> None:
         await _init_db_on_startup(application)
         await converter.post_init(application)
+        
+        # Register bot commands automatically
+        from telegram import BotCommand
+        
+        commands = [
+            BotCommand("start", "Запустить бота"),
+            BotCommand("help", "Справка по командам"),
+            BotCommand("list_channels", "Список отслеживаемых каналов (Админ)"),
+            BotCommand("add_channel", "Добавить канал (Админ)"),
+            BotCommand("del_channel", "Удалить канал (Админ)"),
+        ]
+        await application.bot.set_my_commands(commands)
+        logger.info("Bot commands menu updated")
 
     application = (
         Application.builder()
