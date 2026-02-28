@@ -147,9 +147,9 @@ class TelegramToEpub:
         session_name = str(data_dir / "userbot")
 
         if settings.USERBOT_SESSION_STRING:
-            logger.info("Используем USERBOT_SESSION_STRING для авторизации")
+            logger.info(f"Используем USERBOT_SESSION_STRING для авторизации. Сохраняем в {session_name}.session")
             self._userbot = PyrogramClient(
-                "userbot_session",
+                session_name,
                 session_string=settings.USERBOT_SESSION_STRING,
                 api_id=settings.API_ID,
                 api_hash=settings.API_HASH,
@@ -164,8 +164,18 @@ class TelegramToEpub:
                 no_updates=False,
             )
 
+        @self._userbot.on_message()
+        @self._userbot.on_edited_message()
+        async def _log_all_messages(client, message):
+            chat_title = message.chat.title if message.chat else "Private"
+            chat_type = message.chat.type if message.chat else "Unknown"
+            logger.debug(f"🔍 Юзербот видит сообщение в [{chat_type}] {chat_title}")
+            # continue processing by falling through to other handlers
+            message.continue_propagation()
+
         # Register the channel message handler on the Pyrogram client
-        @self._userbot.on_message(pyro_filters.channel)
+        @self._userbot.on_message(pyro_filters.channel | pyro_filters.group)
+        @self._userbot.on_edited_message(pyro_filters.channel | pyro_filters.group)
         async def _on_channel_message(client, message):
             await self._handle_channel_message(message, application.bot)
 
@@ -183,16 +193,48 @@ class TelegramToEpub:
 
         # Check if this channel is in our watchlist
         channels = await get_channels()
-        chat_username = (
-            pyro_message.chat.username or ""
-        ).lower()
+        
+        chat_username = (pyro_message.chat.username or "").lower()
+        chat_id = str(pyro_message.chat.id)
+        chat_title = pyro_message.chat.title or "Unknown"
+        
+        logger.debug(
+            f"📥 Юзербот поймал сообщение из канала:\n"
+            f"   Название: {chat_title}\n"
+            f"   Username: @{chat_username}\n"
+            f"   ID: {chat_id}\n"
+            f"   Текст/капча есть: {bool(pyro_message.text or pyro_message.caption)}\n"
+            f"   База отслеживаемых: {channels}"
+        )
 
-        if chat_username not in channels:
+        # A channel matches if any of the following is found in the DB:
+        # 1. The exact username (without @, lowercased)
+        # 2. The exact chat ID (e.g. "-100123456")
+        # 3. An invite link (we check if it's in the DB, though invite links don't match username/id easily.
+        #    Actually, if they added an invite link, we might not know the mapping unless we joined via it.
+        #    For now, let's at least compare username and ID.
+        
+        is_monitored = False
+        for ch in channels:
+            ch_lower = ch.lower()
+            if chat_username and chat_username == ch_lower:
+                is_monitored = True
+                break
+            if chat_id == ch_lower:
+                is_monitored = True
+                break
+            # Quick hack: if the user added "https://t.me/chat_username", match the username part
+            if chat_username and chat_username in ch_lower:
+                is_monitored = True
+                break
+                
+        if not is_monitored:
+            logger.debug(f"⏭️ Канал '{chat_title}' (id={chat_id}) не отслеживается, пропускаем.")
             return
 
         text = pyro_message.text or pyro_message.caption or ""
         if not text:
-            logger.debug(f"Канал @{chat_username}: сообщение без текста, пропускаем")
+            logger.debug(f"Канал '{chat_title}': сообщение без текста, пропускаем")
             return
 
         admin_id = settings.ADMIN_ID
@@ -382,8 +424,16 @@ class TelegramToEpub:
         if not channels:
             await update.message.reply_text("Список отслеживаемых каналов пуст.")
         else:
-            lines = "\n".join(f"• @{ch}" for ch in channels)
-            await update.message.reply_text(f"📋 Отслеживаемые каналы:\n{lines}")
+            lines = []
+            for ch in channels:
+                if ch.startswith("http"):
+                    lines.append(f"• {ch}")
+                elif ch.startswith("-") or ch.isdigit():
+                    lines.append(f"• {ch}")
+                else:
+                    lines.append(f"• @{ch}")
+            lines_str = "\n".join(lines)
+            await update.message.reply_text(f"📋 Отслеживаемые каналы:\n{lines_str}")
 
     # ------------------------------------------------------------------
     # PTB message handler (forwarded messages & direct EPUB uploads)
