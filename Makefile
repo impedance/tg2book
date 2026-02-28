@@ -4,6 +4,12 @@ PYTHON = $(VENV)/bin/python
 run:
 	docker compose restart tg2book
 
+stop:
+	docker compose stop tg2book
+
+down:
+	docker compose down
+
 login-userbot:
 	$(PYTHON) login_userbot.py
 

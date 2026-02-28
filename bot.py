@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import tempfile
+from logging.handlers import RotatingFileHandler
 from typing import Any, List, Optional
 
 from telegram import Message, Update
@@ -18,25 +19,33 @@ from utils.text_utils import sanitize_filename, strip_emojis
 # ---------------------------------------------------------------------------
 
 
-class HTTPRequestFilter(logging.Filter):
-    def filter(self, record):
-        return "HTTP Request:" not in record.getMessage()
+# Убеждаемся, что директория для логов существует
+_log_dir = os.path.join("data", "logs")
+os.makedirs(_log_dir, exist_ok=True)
+_log_file = os.path.join(_log_dir, "bot.log")
 
-
-logging.basicConfig(
-    stream=sys.stdout,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.DEBUG,
+# Настраиваем ротацию: макс 10 МБ на файл, храним 5 старых файлов
+_file_handler = RotatingFileHandler(
+    _log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
 )
+_console_handler = logging.StreamHandler(sys.stdout)
+
+# Задача 1: базовый уровень INFO — убирает отладочный шум от сторонних библиотек
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    handlers=[_file_handler, _console_handler],
+)
+
+# Задача 3: внутренний логгер модуля остаётся на DEBUG для отладки нашей бизнес-логики
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-http_filter = HTTPRequestFilter()
-logger.addFilter(http_filter)
-logging.getLogger("httpx").addFilter(http_filter)
-logging.getLogger("urllib3").addFilter(http_filter)
-logging.getLogger("telegram").addFilter(http_filter)
-logging.getLogger().addFilter(http_filter)
+# Задача 2: явно глушим многословные сетевые библиотеки до WARNING
+logging.getLogger("pyrogram").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # Userbot (Pyrogram) — optional, only active when API_ID / API_HASH are set
