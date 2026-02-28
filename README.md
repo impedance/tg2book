@@ -15,7 +15,8 @@ A Telegram bot that converts Telegram posts into EPUB format for e-readers.
 - Python 3.x
 - Telegram Bot API token (obtain from @BotFather)
 - Dropbox App credentials (for file storage)
-- Required Python packages (see requirements.txt)
+- Telegram API credentials (`API_ID` / `API_HASH`) from [my.telegram.org](https://my.telegram.org) (for userbot)
+- Required Python packages (see `requirements.txt`)
 
 ## Installation
 
@@ -36,7 +37,33 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 DROPBOX_APP_KEY=your_dropbox_app_key
 DROPBOX_APP_SECRET=your_dropbox_app_secret
 DROPBOX_REFRESH_TOKEN=your_dropbox_refresh_token
+API_ID=your_api_id
+API_HASH=your_api_hash
 ```
+
+### Авторизация юзербота (QR-код)
+
+Бот использует юзербот для чтения каналов. Для получения строки сессии:
+
+1. Установите временную зависимость (только один раз, локально):
+```bash
+pip install "qrcode[pil]"
+```
+
+2. Запустите скрипт авторизации:
+```bash
+python3 login_qr.py
+```
+
+3. Отсканируйте QR-код в Telegram: **Настройки → Устройства → Войти** (или нажмите на ссылку `tg://login?token=...` в консоли, или откройте файл `login_qr.png`).
+
+4. Скопируйте выведенную строку сессии в `.env`:
+```bash
+USERBOT_SESSION_STRING=<вставьте строку>
+```
+
+> ⚠️ **Никогда не коммитьте `USERBOT_SESSION_STRING` в git!**  
+> `qrcode[pil]` **не** входит в основной `requirements.txt` — он нужен только для одноразовой генерации сессии.
 
 ### Getting Dropbox Credentials
 
