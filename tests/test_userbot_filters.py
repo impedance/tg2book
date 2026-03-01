@@ -47,7 +47,7 @@ if "pyrogram" not in sys.modules:
     sys.modules["pyrogram.filters"] = _pyro_filters
     sys.modules["pyrogram.types"] = _pyro_types
 
-from bot import TelegramToEpub  # noqa: E402
+from bot import TelegramToEpub  # noqa: E402,I001
 
 
 # ---------------------------------------------------------------------------

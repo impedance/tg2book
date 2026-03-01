@@ -3,7 +3,6 @@ Black-box tests for src/qr_utils.py.
 These tests use a fake token and do NOT call any Telegram APIs.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -12,7 +11,7 @@ import pytest
 # Ensure the project root is on the path so we can import src.qr_utils
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.qr_utils import generate_qr_link, generate_qr_image  # noqa: E402
+from src.qr_utils import generate_qr_image, generate_qr_link  # noqa: E402
 
 FAKE_TOKEN = b"fake_token_data"
 

@@ -3,7 +3,6 @@ One-time script to authenticate the Pyrogram userbot and create the session file
 """
 
 import asyncio
-import logging
 import os
 from pathlib import Path
 
@@ -38,21 +37,23 @@ async def main() -> None:
         api_hash=api_hash,
         device_model="Android 11",
         system_version="30.0.0",
-        app_version="8.0.0"
+        app_version="8.0.0",
     )
 
     async with app:
         me = await app.get_me()
         session_string = await app.export_session_string()
-        
-        print(f"\n✅ Авторизация прошла успешно!")
+
+        print("\n✅ Авторизация прошла успешно!")
         print(f"   Аккаунт: {me.first_name} (@{me.username})")
         print(f"   Сессия сохранена в: {SESSION_NAME}.session")
-        print(f"\n🔗 ВАША СТРОКА СЕССИИ (STRING SESSION):")
+        print("\n🔗 ВАША СТРОКА СЕССИИ (STRING SESSION):")
         print("-" * 50)
         print(session_string)
         print("-" * 50)
-        print("\nСкопируйте эту длинную строку и вставьте её в .env на сервере в USERBOT_SESSION_STRING.")
+        print(
+            "\nСкопируйте эту длинную строку и вставьте её в .env на сервере в USERBOT_SESSION_STRING."
+        )
         print("После этого файлы .session больше не понадобятся.")
 
 

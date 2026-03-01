@@ -9,16 +9,16 @@ import tempfile
 from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING, Any, Optional
 
-from pyrogram import Client, filters as pyro_filters
+from pyrogram import Client
+from pyrogram import filters as pyro_filters
 from pyrogram.types import BotCommand
-
-if TYPE_CHECKING:
-    from pyrogram.types import Message
 
 from config import settings
 from services import epub_service
-
 from utils.text_utils import sanitize_filename, strip_emojis
+
+if TYPE_CHECKING:
+    from pyrogram.types import Message
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -132,11 +132,11 @@ class TelegramToEpub:
                 else:
                     usernames.add(ch_norm)
             self._monitored_channels_cache = {"usernames": usernames, "ids": ids}
-            logger.info(
-                f"Кэш каналов загружен: {len(usernames)} username(s), {len(ids)} id(s)"
-            )
+            logger.info(f"Кэш каналов загружен: {len(usernames)} username(s), {len(ids)} id(s)")
         except Exception as e:
-            logger.error(f"Не удалось загрузить кэш каналов из БД: {e}. Отслеживание отключено до перезапуска.")
+            logger.error(
+                f"Не удалось загрузить кэш каналов из БД: {e}. Отслеживание отключено до перезапуска."
+            )
             self._monitored_channels_cache = {"usernames": set(), "ids": set()}
 
     def _make_monitored_filter(self) -> Any:
@@ -164,6 +164,7 @@ class TelegramToEpub:
 
         # Init DB (WAL mode + table creation)
         from userbot_db import init_db
+
         await init_db()
         logger.info("Channel DB инициализирована")
 
@@ -175,13 +176,15 @@ class TelegramToEpub:
         logger.info("Queue worker started")
 
         # Register bot commands menu
-        await bot_client.set_bot_commands([
-            BotCommand("start", "Запустить бота"),
-            BotCommand("help", "Справка по командам"),
-            BotCommand("list_channels", "Список отслеживаемых каналов (Админ)"),
-            BotCommand("add_channel", "Добавить канал (Админ)"),
-            BotCommand("del_channel", "Удалить канал (Админ)"),
-        ])
+        await bot_client.set_bot_commands(
+            [
+                BotCommand("start", "Запустить бота"),
+                BotCommand("help", "Справка по командам"),
+                BotCommand("list_channels", "Список отслеживаемых каналов (Админ)"),
+                BotCommand("add_channel", "Добавить канал (Админ)"),
+                BotCommand("del_channel", "Удалить канал (Админ)"),
+            ]
+        )
         logger.info("Bot commands menu updated")
 
     async def stop(self) -> None:
@@ -412,16 +415,21 @@ class TelegramToEpub:
         logger.debug(f"Полный объект сообщения: {message}")
 
         text_content = message.text or message.caption or ""
-        
+
         forward_attrs = [
-            "forward_date", "forward_from", "forward_from_chat",
-            "forward_sender_name", "forward_origin"
+            "forward_date",
+            "forward_from",
+            "forward_from_chat",
+            "forward_sender_name",
+            "forward_origin",
         ]
         forward_values = {attr: getattr(message, attr, None) for attr in forward_attrs}
         logger.info(f"Атрибуты пересылки: {forward_values}")
 
         is_forwarded = any(val is not None for val in forward_values.values())
-        logger.info(f"is_forwarded: {is_forwarded}, text_content_len: {len(text_content)}, has_document: {bool(message.document)}")
+        logger.info(
+            f"is_forwarded: {is_forwarded}, text_content_len: {len(text_content)}, has_document: {bool(message.document)}"
+        )
 
         if not message.document:
             if is_forwarded:
@@ -450,7 +458,7 @@ class TelegramToEpub:
             logger.info("Попытка получить source_name")
             source_name = self._get_source_info(message)
             logger.info(f"source_name: {source_name}")
-            
+
             logger.info("Попытка получить post_link")
             post_link = self._get_post_link(message)
             logger.info(f"post_link: {post_link}")
@@ -460,9 +468,7 @@ class TelegramToEpub:
             )
 
             await processing_msg.delete()
-            await message.reply(
-                summary_text, disable_web_page_preview=False, parse_mode="html"
-            )
+            await message.reply(summary_text, disable_web_page_preview=False, parse_mode="html")
 
             try:
                 await message.delete()
@@ -476,9 +482,7 @@ class TelegramToEpub:
                 await processing_msg.delete()
             except Exception:
                 pass
-            await message.reply(
-                "❌ Извините, произошла ошибка при обработке вашего сообщения."
-            )
+            await message.reply("❌ Извините, произошла ошибка при обработке вашего сообщения.")
 
     async def _process_uploaded_epub(self, client: Client, message: Message) -> None:
         """Process an uploaded EPUB document and forward it back with Dropbox sync."""
@@ -568,15 +572,21 @@ class TelegramToEpub:
             logger.info(f"Извлечен источник из forward_from_chat: {title}")
             return title
         elif getattr(message, "forward_from", None):
-            name = getattr(message.forward_from, "first_name", "") or getattr(message.forward_from, "full_name", "") or "User"
+            name = (
+                getattr(message.forward_from, "first_name", "")
+                or getattr(message.forward_from, "full_name", "")
+                or "User"
+            )
             logger.info(f"Извлечен источник из forward_from: {name}")
             return name
         elif getattr(message, "forward_sender_name", None):
             logger.info(f"Извлечен источник из forward_sender_name: {message.forward_sender_name}")
             return message.forward_sender_name
-            
+
         if getattr(message, "forward_origin", None):
-            logger.info(f"Найден атрибут forward_origin: {message.forward_origin}, но он не обрабатывается!")
+            logger.info(
+                f"Найден атрибут forward_origin: {message.forward_origin}, но он не обрабатывается!"
+            )
 
         logger.info("Источник не определен, возвращаем 'Unknown Source'")
         return "Unknown Source"
@@ -586,16 +596,18 @@ class TelegramToEpub:
         logger.info(f"Вызов _get_post_link для message_id={message.id}")
         chat = getattr(message, "forward_from_chat", None)
         message_id = getattr(message, "forward_from_message_id", None)
-        
+
         logger.info(f"Для post_link найдены: chat={chat}, message_id={message_id}")
-        
+
         if chat and message_id and getattr(chat, "username", None):
             link = f"https://t.me/{chat.username}/{message_id}"
             logger.info(f"Сформирована ссылка: {link}")
             return link
-            
+
         if getattr(message, "forward_origin", None):
-            logger.info(f"Найден атрибут forward_origin при попытке создать ссылку: {message.forward_origin}")
+            logger.info(
+                f"Найден атрибут forward_origin при попытке создать ссылку: {message.forward_origin}"
+            )
 
         logger.info("Ссылка не сформирована")
         return ""
@@ -619,7 +631,6 @@ def main() -> None:
 
     data_dir = os.environ.get("DATA_DIR", "data")
     os.makedirs(data_dir, exist_ok=True)
-    session_name = os.path.join(data_dir, "userbot")
 
     # Bot client (по токену — для команд и общения с админом)
     bot_client = Client(
@@ -645,31 +656,38 @@ def main() -> None:
 
     converter = TelegramToEpub()
 
-
-
     async def run() -> None:
         # Регистрируем обработчики для bot_client внутри работающего event loop
         MessageHandler = __import__("pyrogram.handlers", fromlist=["MessageHandler"]).MessageHandler
-        
+
         bot_client.add_handler(
-            MessageHandler(converter.cmd_start, pyro_filters.command("start") & pyro_filters.private)
+            MessageHandler(
+                converter.cmd_start, pyro_filters.command("start") & pyro_filters.private
+            )
         )
         bot_client.add_handler(
             MessageHandler(converter.cmd_help, pyro_filters.command("help") & pyro_filters.private)
         )
         bot_client.add_handler(
-            MessageHandler(converter.cmd_add_channel, pyro_filters.command("add_channel") & is_admin)
+            MessageHandler(
+                converter.cmd_add_channel, pyro_filters.command("add_channel") & is_admin
+            )
         )
         bot_client.add_handler(
-            MessageHandler(converter.cmd_del_channel, pyro_filters.command("del_channel") & is_admin)
+            MessageHandler(
+                converter.cmd_del_channel, pyro_filters.command("del_channel") & is_admin
+            )
         )
         bot_client.add_handler(
-            MessageHandler(converter.cmd_list_channels, pyro_filters.command("list_channels") & is_admin)
+            MessageHandler(
+                converter.cmd_list_channels, pyro_filters.command("list_channels") & is_admin
+            )
         )
         bot_client.add_handler(
             MessageHandler(
                 converter.handle_message,
-                pyro_filters.private & ~pyro_filters.command(
+                pyro_filters.private
+                & ~pyro_filters.command(
                     ["start", "help", "add_channel", "del_channel", "list_channels"]
                 ),
             )

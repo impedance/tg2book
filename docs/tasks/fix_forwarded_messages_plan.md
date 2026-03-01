@@ -1,192 +1,101 @@
 # Исправление обработки пересланных сообщений
 
-## Корневая причина
+## Корневая причина (Root Cause)
 
-Telegram **не передаёт `fwd_from` header** для сообщений из каналов с включённой защитой контента («Restrict Saving Content»). В результате Pyrogram не заполняет ни одного forward-атрибута (`forward_date`, `forward_from`, `forward_from_chat`, `forward_sender_name`) — все остаются `None`.
+**Логическая ошибка в предыдущем анализе**: Ранее предполагалось, что для сообщений из каналов с включённой защитой контента («Restrict Saving Content») Pyrogram не заполняет *ни одного* атрибута пересылки, и `is_forwarded` становится `False`. Это не так.
+Telegram **всегда передаёт дату оригинального сообщения** (`forward_date`) для пересланных сообщений, даже если профиль автора или канал скрыт настройками приватности. Из-за этого текущая проверка `is_forwarded = any(val is not None for val in forward_values.values())` возвращает `True`, и бот пытается обработать сообщение.
 
-Код в [handle_message](file:///home/spec/work/tg2book/bot.py#L409-L481) определяет пересылку так:
-```python
-is_forwarded = any(val is not None for val in forward_values.values())
-```
-Когда все атрибуты `None` → `is_forwarded = False` → сообщение обрабатывается как обычный текст с `source_name = "Unknown Source"` и без ссылки на оригинал.
+**Настоящая проблема**:
+Telegram **не передаёт информацию об источнике** (имя пользователя, название чата) для защищённых сообщений.
+Таким образом, `forward_from`, `forward_from_chat` и `forward_sender_name` остаются `None`.
+Когда сообщение передаётся в функцию `_get_source_info(message)` для определения источника, функция не находит ни одного из этих атрибутов, доходит до самого конца и возвращает `"Unknown Source"`.
+В результате EPUB файл создаётся, но с неправильным указанием источника ("Unknown Source" вместо того, чтобы честно отразить статус пересылки).
 
-> [!IMPORTANT]
-> Атрибут `forward_origin` (строка 419) **не существует** в Pyrogram 2.0.106 — `getattr` всегда возвращает `None`.
+Кроме того, атрибут `forward_origin` (добавленный в новых версиях Telegram API) не возвращает полезных данных в используемой версии Pyrogram (2.0.106) и только засоряет логи ложными срабатываниями.
 
-## Решение принято
+## Решение
 
-> [!NOTE]
-> **Вариант C (подтверждён)**: пересланные сообщения с недоступными forward-атрибутами обрабатываются с `source = "Forwarded"`. EPUB создаётся, source честно отражает статус пересылки.
-
-## Proposed Changes
-
-### Фаза 1: Диагностическое логирование
-
-Перед исправлением нужно убедиться, что проблема именно в отсутствии `fwd_from`. Добавим лог сырого Pyrogram-объекта.
-
-#### [MODIFY] [bot.py](file:///home/spec/work/tg2book/bot.py)
-
-**Изменение 1 — расширенный лог при входе в `handle_message`** (строки 411-424):
-
-```diff
- async def handle_message(self, client: Client, message: Message) -> None:
-     logger.info(f"Вход в handle_message: chat_id={message.chat.id}, message_id={message.id}")
--    logger.debug(f"Полный объект сообщения: {message}")
-+    # Логируем ключевые атрибуты для диагностики пересылки
-+    logger.debug(
-+        f"Message attrs: text={bool(message.text)}, caption={bool(message.caption)}, "
-+        f"document={bool(message.document)}, "
-+        f"forward_date={message.forward_date}, "
-+        f"forward_from={getattr(message, 'forward_from', 'MISSING')}, "
-+        f"forward_from_chat={getattr(message, 'forward_from_chat', 'MISSING')}, "
-+        f"forward_sender_name={getattr(message, 'forward_sender_name', 'MISSING')}"
-+    )
-```
-
-Это позволит в логах видеть, какие атрибуты реально приходят при пересылке.
+Необходимо обновить логику `_get_source_info`, чтобы она корректно распознавала скрытые пересылки (опираясь на наличие `forward_date`) и возвращала строку `"Forwarded"` вместо `"Unknown Source"`. Также нужно очистить код от проверок мертвого поля `forward_origin`.
 
 ---
 
-### Фаза 2: Исправление определения пересылки
+## План реализации (разбит на задачи для Junior-разработчика)
 
-#### [MODIFY] [bot.py](file:///home/spec/work/tg2book/bot.py)
+Этот план следует выполнять последовательно. Каждая задача затрагивает изолированный кусок логики.
 
-**Изменение 2 — удалить несуществующий `forward_origin` из проверки** (строки 416-423):
+### Задача 1: Очистка кода от мертвого атрибута `forward_origin`
+**Описание**: Атрибут `forward_origin` не работает в нашей версии Pyrogram и генерирует бесполезные предупреждения в логах.
+**Файлы**: `bot.py`
+**Шаги для реализации**:
+1. Перейдите к функции `handle_message` (строки ~411-424). Удалите строку `"forward_origin"` из списка `forward_attrs`.
+2. Перейдите к функции `_get_source_info` (строки ~563-583). Найдите и удалите блок проверки `if getattr(message, "forward_origin", None):` и соответствующий ему `logger.info`.
+3. Перейдите к функции `_get_post_link` (строка ~584-602). Аналогично удалите блок проверки `forward_origin`.
 
-```diff
--    forward_attrs = [
--        "forward_date", "forward_from", "forward_from_chat",
--        "forward_sender_name", "forward_origin"
--    ]
-+    forward_attrs = [
-+        "forward_date", "forward_from", "forward_from_chat",
-+        "forward_sender_name"
-+    ]
-```
+### Задача 2: Добавление диагностического логирования (для удобства отладки)
+**Описание**: Чтобы легче отлаживать плавающие баги с атрибутами сообщений, добавим расширенный логгинг.
+**Файлы**: `bot.py`
+**Шаги для реализации**:
+1. В функции `handle_message` найдите строку: `logger.debug(f"Полный объект сообщения: {message}")`.
+2. Замените её на более фокусное логирование ключевых полей (чтобы не забивать логи простынями JSON'а):
+   ```python
+   logger.debug(
+       f"Message attrs: text={bool(message.text)}, caption={bool(message.caption)}, "
+       f"forward_date={getattr(message, 'forward_date', None)}, "
+       f"forward_from={getattr(message, 'forward_from', 'MISSING')}, "
+       f"forward_from_chat={getattr(message, 'forward_from_chat', 'MISSING')}, "
+       f"forward_sender_name={getattr(message, 'forward_sender_name', 'MISSING')}"
+   )
+   ```
 
-**Изменение 3 — удалить мёртвые проверки `forward_origin`** (строки 578-579, 597-598):
+### Задача 3: Исправление логики `_get_source_info` для скрытых источников
+**Описание**: Главный фикс баги. Если автор сообщения скрыт настройками приватности, нужно указывать источник как "Forwarded", а не "Unknown Source".
+**Файлы**: `bot.py`
+**Шаги для реализации**:
+1. Перейдите к концу функции `_get_source_info`.
+2. Перед возвратом `"Unknown Source"` добавьте проверку на то, что сообщение всё-таки является пересланным (проверяем наличие `forward_date`).
+3. Код должен выглядеть примерно так:
+   ```python
+        if getattr(message, "forward_date", None):
+            logger.info("Источник скрыт настройками приватности, помечаем как 'Forwarded'")
+            return "Forwarded"
 
-В `_get_source_info`:
-```diff
--    if getattr(message, "forward_origin", None):
--        logger.info(f"Найден атрибут forward_origin: {message.forward_origin}, но он не обрабатывается!")
-```
+        logger.info("Источник не определен, возвращаем 'Unknown Source'")
+        return "Unknown Source"
+   ```
 
-В `_get_post_link`:
-```diff
--    if getattr(message, "forward_origin", None):
--        logger.info(f"Найден атрибут forward_origin при попытке создать ссылку: {message.forward_origin}")
-```
-
-**Изменение 4 — Улучшить `_get_source_info` для случая «всё None»** (зависит от выбранного варианта A/B/C):
-
-Если выбран **Вариант C** (рекомендуемый):
-```diff
-     logger.info("Источник не определен, возвращаем 'Unknown Source'")
--    return "Unknown Source"
-+    return "Forwarded" if getattr(message, "forward_date", None) else "Unknown Source"
-```
-
-> [!NOTE]
-> `forward_date` — единственный атрибут, который Telegram **всегда** передаёт для пересланных сообщений (даже с защитой контента). Если `forward_date is not None` — значит это точно пересылка, даже если другие атрибуты скрыты.
+### Задача 4: Обновление тестов `test_bot.py`
+**Описание**: Покрыть новую логику тестами, гарантирующую защиту от регрессий. Проверим случай скрытого источника и обычного текста.
+**Файлы**: `tests/test_bot.py`
+**Шаги для реализации**:
+1. Добавьте в фикстуру `mock_message` недостающие базовые поля. Например, `msg.id = 1`, `msg.forward_date = None`, `msg.forward_sender_name = None` (во избежание ошибок `AttributeError`).
+2. **Напишите новый тест** `test_handle_forwarded_privacy_protected` с использованием декоратора `@pytest.mark.asyncio`. 
+   - Замокайте сообщение так, чтобы `msg.forward_date` было задано (любое трушное значение), а `forward_from`, `forward_from_chat` и `forward_sender_name` были равны `None`.
+   - Проверьте, что в шпион/мок `process_text_to_epub` был передан аргумент `source_name="Forwarded"`.
+3. **Напишите новый тест** `test_handle_plain_text_message`.
+   - Замокайте сообщение, сбросив все forward-атрибуты через `None`.
+   - Проверьте, что `process_text_to_epub` был вызван с аргументом `source_name="Unknown Source"`.
 
 ---
 
-### Фаза 3: Обновление тестов
+## План ручного и автоматизированного тестирования (Verification Plan)
 
-#### [MODIFY] [test_bot.py](file:///home/spec/work/tg2book/tests/test_bot.py)
+### Автоматизированное
+1. Прогнать все тесты:
+   ```bash
+   make test
+   ```
+2. Убедиться, что новые тесты покрыли изменения (PASS для `test_handle_forwarded_privacy_protected` и `test_handle_plain_text_message`).
+3. Запустить проверку линтерами:
+   ```bash
+   make lint
+   make typecheck
+   ```
 
-**Изменение 5 — дополнить `mock_message` fixture** (строка 86-99):
-
-```diff
- @pytest.fixture
- def mock_message(self):
-     msg = MagicMock()
-     msg.reply = AsyncMock()
-     msg.reply_document = AsyncMock()
-     msg.delete = AsyncMock()
-     msg.chat.id = 12345
-+    msg.id = 1
-     msg.text = None
-     msg.caption = None
-     msg.document = None
-     msg.forward_date = None
-     msg.forward_from = None
-     msg.forward_from_chat = None
-     msg.forward_sender_name = None
-     return msg
-```
-
-**Изменение 6 — добавить тест для пересылки с privacy protection** (новый тест):
-
-```python
-@pytest.mark.asyncio
-@patch("services.epub_service.process_text_to_epub", new_callable=AsyncMock)
-async def test_handle_forwarded_privacy_protected(self, mock_process, mock_client, mock_message):
-    """Forwarded message where Telegram strips all forward info except forward_date."""
-    mock_message.text = "Текст из защищённого канала"
-    mock_message.forward_date = MagicMock()  # Telegram always sends this
-    mock_message.forward_from = None         # stripped by privacy
-    mock_message.forward_from_chat = None    # stripped by privacy
-    mock_message.forward_sender_name = None  # stripped by privacy
-    mock_process.return_value = "<b>Done</b>"
-
-    converter = TelegramToEpub()
-    await converter.handle_message(mock_client, mock_message)
-
-    assert mock_message.reply.called
-    # Verify process_text_to_epub was called (message was treated as forwarded text)
-    mock_process.assert_called_once()
-```
-
-**Изменение 7 — добавить тест для обычного текста (не пересылка)**:
-
-```python
-@pytest.mark.asyncio
-@patch("services.epub_service.process_text_to_epub", new_callable=AsyncMock)
-async def test_handle_plain_text_message(self, mock_process, mock_client, mock_message):
-    """Plain text message (not forwarded) should still produce EPUB."""
-    mock_message.text = "Просто текст от пользователя"
-    mock_message.forward_date = None
-    mock_process.return_value = "<b>Done</b>"
-
-    converter = TelegramToEpub()
-    await converter.handle_message(mock_client, mock_message)
-
-    assert mock_message.reply.called
-    mock_process.assert_called_once()
-```
-
-## Verification Plan
-
-### Automated Tests
-
-```bash
-# Запуск всех тестов через Docker (как в Makefile)
-make test
-
-# Или локально, если Docker недоступен
-.venv/bin/python -m pytest tests/test_bot.py -v
-```
-
-Ожидаемый результат:
-- `test_handle_forwarded_message_success` — ✅ PASS
-- `test_handle_forwarded_privacy_protected` — ✅ PASS (новый)
-- `test_handle_plain_text_message` — ✅ PASS (новый)
-- `test_handle_epub_document` — ✅ PASS
-- `test_extract_title` — ✅ PASS
-
-### Lint & Typecheck
-
-```bash
-make lint
-make typecheck
-```
-
-### Manual Verification
-
-1. **Пересобрать и перезапустить бота**: `make build`
-2. **Переслать сообщение из обычного канала** (без защиты контента) → бот должен создать EPUB с правильным source
-3. **Переслать сообщение из канала с «Restrict Saving Content»** → бот должен создать EPUB с source = `"Forwarded"` (или иной, в зависимости от выбранного варианта)
-4. **Проверить логи**: `make logs` — убедиться, что диагностический лог показывает forwarding-атрибуты
-5. **Отправить обычный текст** (не пересылка) → бот должен создать EPUB с source = `"Unknown Source"`
+### Ручное тестирование
+1. Запустить бота локально:
+   ```bash
+   make run
+   ```
+2. Отправить боту **обычный текстовый пост** от своего лица (не пересылая). Должен сгенерироваться EPUB с отсутствующим автором или пометкой "Unknown Source".
+3. Переслать случайное сообщение **из публичного канала**. Бот должен сформировать EPUB с именем этого канала в названии/авторе файла.
+4. Выбрать канал с защитой контента («Restrict Saving Content», если есть возможность) либо найти пользователя, который **запретил ссылку на свой профиль** при пересылке. Переслать сообщение от него. Бот должен обработать текст и вывести EPUB-файл с названием "Forwarded", не свалившись с ошибкой и не выведя "Unknown Source".

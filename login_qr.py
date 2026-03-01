@@ -12,6 +12,7 @@ in-memory and exports a portable string session at the end.
 """
 
 import asyncio
+import getpass
 import sys
 
 # --- Dependency guard: fail loudly and early if qrcode is missing ---
@@ -20,13 +21,14 @@ try:
 except ImportError:
     print(
         "❌ Ошибка: библиотека 'qrcode[pil]' не установлена.\n"
-        "   Выполните:  pip install \"qrcode[pil]\"\n"
+        '   Выполните:  pip install "qrcode[pil]"\n'
         "   Затем снова запустите скрипт."
     )
     sys.exit(1)
 
 from pyrogram import Client
 from pyrogram import raw as raw_types
+from pyrogram.errors import SessionPasswordNeeded
 from pyrogram.raw import functions
 
 from config import settings
@@ -61,7 +63,7 @@ async def main() -> None:
 
     # Use connect() manually to bypass Pyrogram's default phone number prompt
     await app.connect()
-    
+
     try:
         print("\n🔄 Получаем QR-токен от Telegram...\n")
 
@@ -104,10 +106,7 @@ async def main() -> None:
 
         # --- Polling loop: wait for the user to scan the QR ---
         print("⏳ Ожидаем сканирования QR-кода...")
-        
-        from pyrogram.errors import SessionPasswordNeeded
-        import getpass
-        
+
         while True:
             await asyncio.sleep(POLL_INTERVAL)
 
@@ -141,9 +140,7 @@ async def main() -> None:
             elif isinstance(status, raw_types.types.auth.LoginTokenMigrateTo):
                 # Telegram wants us to reconnect to a different DC
                 print("   ↩️  Перенаправление на другой DC, переподключаемся...")
-                status = await app.invoke(
-                    functions.auth.ImportLoginToken(token=status.token)
-                )
+                status = await app.invoke(functions.auth.ImportLoginToken(token=status.token))
                 if isinstance(status, raw_types.types.auth.LoginTokenSuccess):
                     print("\n✅ QR-код успешно отсканирован! Авторизация подтверждена.")
                     break
@@ -151,7 +148,7 @@ async def main() -> None:
 
         # --- Export session string ---
         session_string = await app.export_session_string()
-        
+
         # After successful QR login, pyrogram might need a moment to register auth state completely
         # But we can try to get the user info
         try:

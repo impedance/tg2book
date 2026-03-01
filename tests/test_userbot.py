@@ -111,7 +111,6 @@ async def test_add_channel_rejects_non_admin():
     converter = TelegramToEpub()
     msg = _make_message(user_id=99999)
     msg.command = ["add_channel", "somechannel"]
-    client = MagicMock()
 
     with patch("bot.settings") as mock_settings:
         mock_settings.ADMIN_ID = 42

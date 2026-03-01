@@ -61,7 +61,9 @@ async def test_process_file_to_dropbox_uses_to_thread():
     tracking_to_thread.calls = []
 
     with (
-        patch("services.epub_service.dropbox_module.upload_to_dropbox", return_value=True) as mock_upload,
+        patch(
+            "services.epub_service.dropbox_module.upload_to_dropbox", return_value=True
+        ) as mock_upload,
         patch("services.epub_service.asyncio.to_thread", side_effect=tracking_to_thread),
     ):
         result = await epub_service.process_file_to_dropbox("/tmp/book.epub", "Book.epub")

@@ -6,6 +6,17 @@ target-version = "py311"
 select = ["E", "F", "I", "W", "C90", "B", "PL"]
 ignore = ["PLR0913", "PLR0915", "PLR2004", "E402", "PLC0415", "C901", "PLR0912", "E501"]
 
+[tool.ruff.lint.isort]
+known-first-party = [
+    "config",
+    "dropbox_module",
+    "epub_functions",
+    "services",
+    "src",
+    "userbot_db",
+    "utils",
+]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -27,3 +38,7 @@ files = [
     "utils",
     "src",
 ]
+
+[[tool.mypy.overrides]]
+module = ["bot"]
+ignore_errors = true

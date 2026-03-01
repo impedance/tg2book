@@ -2,8 +2,8 @@ import asyncio
 import os
 import sys
 
-from pyrogram import Client, filters
 from dotenv import load_dotenv
+from pyrogram import Client
 
 load_dotenv()
 
@@ -20,13 +20,15 @@ app = Client(
     session_string=SESSION_STRING,
     api_id=API_ID,
     api_hash=API_HASH,
-    no_updates=False
+    no_updates=False,
 )
 
+
 @app.on_message()
-async def my_handler(client, message):
+async def my_handler(client, message):  # noqa: ARG001
     chat_type = message.chat.type if message.chat else "Private"
     print(f"PONG! Received message in {chat_type}: {message.text or message.caption}")
+
 
 async def main():
     print("Starting client...")
@@ -34,12 +36,13 @@ async def main():
     me = await app.get_me()
     print(f"Logged in as {me.first_name}")
     print("Waiting for messages for 60 seconds...")
-    
+
     # Wait to see if we get any messages
     await asyncio.sleep(60)
-    
+
     await app.stop()
     print("Done")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

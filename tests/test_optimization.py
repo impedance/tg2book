@@ -91,7 +91,7 @@ async def test_concurrent_db_no_locked_error(tmp_path):
 
     userbot_db.DB_PATH = original_path
 
-    assert not errors, f"Конкурентные запросы упали с ошибками:\n" + "\n".join(errors)
+    assert not errors, "Конкурентные запросы упали с ошибками:\n" + "\n".join(errors)
 
 
 # ===========================================================================
@@ -175,9 +175,7 @@ async def test_epub_processing_does_not_block_event_loop(tmp_path):
 
     userbot_db.DB_PATH = original_path
 
-    assert elapsed < 0.5, (
-        f"converter.cmd_start() заняло {elapsed:.3f}с — event loop заблокирован!"
-    )
+    assert elapsed < 0.5, f"converter.cmd_start() заняло {elapsed:.3f}с — event loop заблокирован!"
     message.reply.assert_called_once()
 
 
@@ -237,7 +235,7 @@ async def test_worker_calls_task_done_on_exception(tmp_path):
     userbot_db.DB_PATH = original_path
 
     # Вторая задача дошла до send_message несмотря на ошибку первой
-    assert mock_bot.send_message.call_count == 1, (
-        "Воркер должен продолжить обработку после ошибки в первой задаче"
-    )
+    assert (
+        mock_bot.send_message.call_count == 1
+    ), "Воркер должен продолжить обработку после ошибки в первой задаче"
     assert call_count == 2, "epub_service должен был вызваться дважды"

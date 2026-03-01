@@ -144,5 +144,3 @@ async def test_full_pipeline_document_to_dropbox(mock_message, mock_client):
 
         api_arg = json.loads(kwargs["headers"]["Dropbox-API-Arg"])
         assert "User_Book.epub" in api_arg["path"]
-
-
