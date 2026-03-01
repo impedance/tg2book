@@ -1,6 +1,6 @@
 # Deployment Guide for tg2book
 
-This guide describes how to deploy the `tg2book` bot to a remote VPS (Virtual Private Server) using Docker.
+This guide describes how to deploy the `tg2book` bot to a remote VPS (Virtual Private Server) using the production Docker stack.
 
 ## Prerequisites
 
@@ -36,7 +36,7 @@ This guide describes how to deploy the `tg2book` bot to a remote VPS (Virtual Pr
 
 4.  **Start the bot**:
     ```bash
-    docker compose up -d --build
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
     ```
 
 ## How to Update the Bot (CI/CD Manual Workflow)
@@ -59,7 +59,7 @@ When you make changes to the code (e.g., in `bot.py`):
         ```
     *   Rebuild and restart the container:
         ```bash
-        docker compose up -d --build
+        docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
         ```
         *   `--build` ensures the Docker image is recreated with the new code.
         *   `-d` runs it in the background.
@@ -79,18 +79,18 @@ Use this if you don't want to use Git on the server.
     ssh remote_user@remote_ip
     cd tg2book
     nano .env  # Paste secrets here
-    docker compose up -d --build
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
     ```
 
 ## Post-Deployment Checks
 
 1.  **Check status**:
     ```bash
-    docker compose ps
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
     ```
     Should show `tg2book` as `Up`.
 
 2.  **Check logs**:
     ```bash
-    docker compose logs -f --tail=50
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f --tail=50
     ```

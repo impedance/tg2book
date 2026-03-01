@@ -78,9 +78,13 @@ USERBOT_SESSION_STRING=<вставьте строку>
 
 ## Usage
 For local development with Docker:
-- `make run`: Restart container to apply code changes
+- `make build`: Build and start the development container with the repository bind-mounted into `/app`
+- `make run`: Restart the development container after code changes without rebuilding the image
+- `make smoke`: Fast local regression pass for agents and small edits
+- `make preflight`: Full verification before handoff or merge
 - `make test`: Run tests inside container
 - `make logs`: View logs
+- `make prod-up`: Build and start the lean production container without dev dependencies
 
 1. Start the bot:
 ```bash
@@ -101,6 +105,12 @@ The project uses the following technologies:
 - Pyrogram for Telegram bot and userbot implementation
 - Custom zero-dependency EPUB generator (`epub_functions.py`)
 - requests for Dropbox content uploading
+
+Tests live under `tests/`, while credentialed/manual diagnostics are kept in `tests/manual/`.
+
+Docker is split into two modes:
+- `docker-compose.dev.yml` for development: dev tools installed, source code bind-mounted, no rebuild needed for ordinary code edits.
+- `docker-compose.prod.yml` for production: runtime dependencies only, no bundled test suite or dev tooling.
 
 ## License
 

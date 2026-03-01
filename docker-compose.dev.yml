@@ -1,0 +1,8 @@
+services:
+  tg2book:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - .:/app
+      - ./data:/app/data

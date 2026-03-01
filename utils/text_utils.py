@@ -1,4 +1,5 @@
 import re
+from html import escape as html_escape
 from typing import Optional
 
 
@@ -62,8 +63,9 @@ def format_message(text: str) -> str:
     paragraphs = text.split("\n\n")
     formatted_paragraphs = []
     for para in paragraphs:
-        # Подчёркиваем .md-ссылки и заменяем одиночные переносы на <br>
-        formatted_para = link_pattern.sub(underline_md, para)
+        # Экранируем пользовательский текст, затем возвращаем безопасную разметку
+        formatted_para = html_escape(para, quote=False)
+        formatted_para = link_pattern.sub(underline_md, formatted_para)
         formatted_para = formatted_para.replace("\n", "<br>")
         formatted_paragraphs.append(f"<p>{formatted_para}</p>")
     return "\n".join(formatted_paragraphs)

@@ -1,32 +1,70 @@
 VENV = .venv
 PYTHON = $(VENV)/bin/python
+COMPOSE_BASE = docker compose -f docker-compose.yml
+COMPOSE_DEV = $(COMPOSE_BASE) -f docker-compose.dev.yml
+COMPOSE_PROD = $(COMPOSE_BASE) -f docker-compose.prod.yml
+DOCKER_PYTHON = $(COMPOSE_DEV) exec tg2book python -m
+
+.PHONY: run stop down login-userbot test smoke preflight logs build up prod-build prod-up prod-logs prod-down typecheck format lint
 
 run:
-	docker compose restart tg2book
+	$(COMPOSE_DEV) up -d tg2book
+
+up:
+	$(COMPOSE_DEV) up -d
 
 stop:
-	docker compose stop tg2book
+	$(COMPOSE_DEV) stop tg2book
 
 down:
-	docker compose down
+	$(COMPOSE_DEV) down
 
 login-userbot:
 	$(PYTHON) login_userbot.py
 
 test:
-	docker compose exec tg2book python -m pytest
+	$(DOCKER_PYTHON) pytest tests
+
+smoke:
+	$(DOCKER_PYTHON) ruff check .
+	$(DOCKER_PYTHON) pytest \
+		tests/test_optimization.py \
+		tests/test_epub_golden.py \
+		tests/test_epub_service_guardrails.py
 
 logs:
-	docker compose logs -f tg2book
+	$(COMPOSE_DEV) logs -f tg2book
 
 build:
-	docker compose up -d --build
+	$(COMPOSE_DEV) up -d --build
+
+prod-build:
+	$(COMPOSE_PROD) build
+
+prod-up:
+	$(COMPOSE_PROD) up -d --build
+
+prod-logs:
+	$(COMPOSE_PROD) logs -f tg2book
+
+prod-down:
+	$(COMPOSE_PROD) down
 
 typecheck:
-	docker compose exec tg2book python -m mypy bot.py dropbox_module.py epub_functions.py
+	$(DOCKER_PYTHON) mypy \
+		bot.py \
+		config.py \
+		dropbox_module.py \
+		epub_functions.py \
+		services/epub_service.py \
+		userbot_db.py \
+		utils \
+		src
 
 format:
-	docker compose exec tg2book python -m ruff check --fix . && docker compose exec tg2book python -m ruff format .
+	$(DOCKER_PYTHON) ruff check --fix . && $(DOCKER_PYTHON) ruff format .
 
 lint:
-	docker compose exec tg2book python -m ruff check .
+	$(DOCKER_PYTHON) ruff check .
+
+preflight: format lint typecheck test

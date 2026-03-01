@@ -408,14 +408,20 @@ class TelegramToEpub:
 
     async def handle_message(self, client: Client, message: Message) -> None:
         """Handle incoming forwarded messages or plain text for EPUB conversion."""
+        logger.info(f"Вход в handle_message: chat_id={message.chat.id}, message_id={message.id}")
+        logger.debug(f"Полный объект сообщения: {message}")
+
         text_content = message.text or message.caption or ""
         
-        is_forwarded = bool(
-            getattr(message, "forward_date", None)
-            or getattr(message, "forward_from", None)
-            or getattr(message, "forward_from_chat", None)
-            or getattr(message, "forward_sender_name", None)
-        )
+        forward_attrs = [
+            "forward_date", "forward_from", "forward_from_chat",
+            "forward_sender_name", "forward_origin"
+        ]
+        forward_values = {attr: getattr(message, attr, None) for attr in forward_attrs}
+        logger.info(f"Атрибуты пересылки: {forward_values}")
+
+        is_forwarded = any(val is not None for val in forward_values.values())
+        logger.info(f"is_forwarded: {is_forwarded}, text_content_len: {len(text_content)}, has_document: {bool(message.document)}")
 
         if not message.document:
             if is_forwarded:
@@ -441,8 +447,13 @@ class TelegramToEpub:
         processing_msg = await message.reply("📚 Создаю EPUB файл...")
 
         try:
+            logger.info("Попытка получить source_name")
             source_name = self._get_source_info(message)
+            logger.info(f"source_name: {source_name}")
+            
+            logger.info("Попытка получить post_link")
             post_link = self._get_post_link(message)
+            logger.info(f"post_link: {post_link}")
 
             summary_text = await epub_service.process_text_to_epub(
                 text_content, source_name, post_link
@@ -551,22 +562,42 @@ class TelegramToEpub:
 
     def _get_source_info(self, message: Message) -> str:
         """Get the name of the channel or user forwarded from."""
+        logger.info(f"Вызов _get_source_info для message_id={message.id}")
         if getattr(message, "forward_from_chat", None):
-            return message.forward_from_chat.title or "Channel"
+            title = message.forward_from_chat.title or "Channel"
+            logger.info(f"Извлечен источник из forward_from_chat: {title}")
+            return title
         elif getattr(message, "forward_from", None):
-            return getattr(message.forward_from, "first_name", "") or getattr(message.forward_from, "full_name", "") or "User"
+            name = getattr(message.forward_from, "first_name", "") or getattr(message.forward_from, "full_name", "") or "User"
+            logger.info(f"Извлечен источник из forward_from: {name}")
+            return name
         elif getattr(message, "forward_sender_name", None):
+            logger.info(f"Извлечен источник из forward_sender_name: {message.forward_sender_name}")
             return message.forward_sender_name
+            
+        if getattr(message, "forward_origin", None):
+            logger.info(f"Найден атрибут forward_origin: {message.forward_origin}, но он не обрабатывается!")
+
+        logger.info("Источник не определен, возвращаем 'Unknown Source'")
         return "Unknown Source"
 
     def _get_post_link(self, message: Message) -> str:
         """Extract post link from a forwarded message."""
+        logger.info(f"Вызов _get_post_link для message_id={message.id}")
         chat = getattr(message, "forward_from_chat", None)
         message_id = getattr(message, "forward_from_message_id", None)
         
+        logger.info(f"Для post_link найдены: chat={chat}, message_id={message_id}")
+        
         if chat and message_id and getattr(chat, "username", None):
-            return f"https://t.me/{chat.username}/{message_id}"
+            link = f"https://t.me/{chat.username}/{message_id}"
+            logger.info(f"Сформирована ссылка: {link}")
+            return link
+            
+        if getattr(message, "forward_origin", None):
+            logger.info(f"Найден атрибут forward_origin при попытке создать ссылку: {message.forward_origin}")
 
+        logger.info("Ссылка не сформирована")
         return ""
 
 
