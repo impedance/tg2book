@@ -46,8 +46,12 @@ if "pyrogram" not in sys.modules:
     _pyro_filters = MagicMock()
     _pyro_filters.channel = MagicMock()
     _pyro.filters = _pyro_filters
+    _pyro_types = MagicMock()
+    _pyro_types.BotCommand = MagicMock
+    _pyro.types = _pyro_types
     sys.modules["pyrogram"] = _pyro
     sys.modules["pyrogram.filters"] = _pyro_filters
+    sys.modules["pyrogram.types"] = _pyro_types
 
 
 import userbot_db  # noqa: E402

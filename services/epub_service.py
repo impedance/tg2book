@@ -6,6 +6,7 @@ import tempfile
 import dropbox_module
 from epub_functions import create_epub
 from utils.text_utils import extract_title, format_message, sanitize_filename
+from services.parser_service import extract_url, parse_article
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,17 @@ async def process_text_to_epub(text_content: str, source_name: str, first_link: 
     3. Upload to Dropbox
     4. Return summary text
     """
-    title = extract_title(text_content)
-    content = format_message(text_content)
+    url = extract_url(text_content)
+    parsed = None
+    if url:
+        parsed = await asyncio.to_thread(parse_article, url)
+
+    if parsed:
+        title, content = parsed
+    else:
+        title = extract_title(text_content)
+        content = format_message(text_content)
+    
     safe_filename = sanitize_filename(title)
 
     epub_path = None

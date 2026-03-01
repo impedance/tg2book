@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler
 from typing import TYPE_CHECKING, Any, Optional
 
 from pyrogram import Client, filters as pyro_filters
+from pyrogram.types import BotCommand
 
 if TYPE_CHECKING:
     from pyrogram.types import Message
@@ -175,11 +176,11 @@ class TelegramToEpub:
 
         # Register bot commands menu
         await bot_client.set_bot_commands([
-            ("start", "Запустить бота"),
-            ("help", "Справка по командам"),
-            ("list_channels", "Список отслеживаемых каналов (Админ)"),
-            ("add_channel", "Добавить канал (Админ)"),
-            ("del_channel", "Удалить канал (Админ)"),
+            BotCommand("start", "Запустить бота"),
+            BotCommand("help", "Справка по командам"),
+            BotCommand("list_channels", "Список отслеживаемых каналов (Админ)"),
+            BotCommand("add_channel", "Добавить канал (Админ)"),
+            BotCommand("del_channel", "Удалить канал (Админ)"),
         ])
         logger.info("Bot commands menu updated")
 
@@ -408,10 +409,16 @@ class TelegramToEpub:
     async def handle_message(self, client: Client, message: Message) -> None:
         """Handle incoming forwarded messages or plain text for EPUB conversion."""
         text_content = message.text or message.caption or ""
-        forward_origin = getattr(message, "forward_origin", None)
+        
+        is_forwarded = bool(
+            getattr(message, "forward_date", None)
+            or getattr(message, "forward_from", None)
+            or getattr(message, "forward_from_chat", None)
+            or getattr(message, "forward_sender_name", None)
+        )
 
         if not message.document:
-            if forward_origin and forward_origin.type.value in ["user", "chat", "hidden_user", "channel"]:
+            if is_forwarded:
                 if not text_content:
                     logger.info("Forwarded message does not contain text")
                     await message.reply(
@@ -544,32 +551,19 @@ class TelegramToEpub:
 
     def _get_source_info(self, message: Message) -> str:
         """Get the name of the channel or user forwarded from."""
-        forward_origin = getattr(message, "forward_origin", None)
-        if not forward_origin:
-            return ""
-
-        origin_type = forward_origin.type.value if hasattr(forward_origin.type, "value") else str(forward_origin.type)
-
-        if origin_type == "chat" and getattr(forward_origin, "chat", None):
-            return forward_origin.chat.title or "Channel"
-        elif origin_type == "channel" and getattr(forward_origin, "chat", None):
-            return forward_origin.chat.title or "Channel"
-        elif origin_type == "user" and getattr(forward_origin, "from_user", None):
-            return forward_origin.from_user.full_name or "User"
-        elif origin_type == "hidden_user":
-            return "Hidden User"
-
+        if getattr(message, "forward_from_chat", None):
+            return message.forward_from_chat.title or "Channel"
+        elif getattr(message, "forward_from", None):
+            return getattr(message.forward_from, "first_name", "") or getattr(message.forward_from, "full_name", "") or "User"
+        elif getattr(message, "forward_sender_name", None):
+            return message.forward_sender_name
         return "Unknown Source"
 
     def _get_post_link(self, message: Message) -> str:
         """Extract post link from a forwarded message."""
-        forward_origin = getattr(message, "forward_origin", None)
-        if not forward_origin:
-            return ""
-
-        chat = getattr(forward_origin, "chat", None)
-        message_id = getattr(forward_origin, "message_id", None)
-
+        chat = getattr(message, "forward_from_chat", None)
+        message_id = getattr(message, "forward_from_message_id", None)
+        
         if chat and message_id and getattr(chat, "username", None):
             return f"https://t.me/{chat.username}/{message_id}"
 
