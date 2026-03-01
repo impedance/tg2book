@@ -48,8 +48,9 @@ The system is built on the **Pyrogram** framework utilizing Python's `asyncio` f
 3. **Business Logic / Services Layer**
    - **`epub_service.py`:** The main coordinator. Orchestrates parsing, EPUB generation, and Dropbox uploads. Offloads blocking synchronous operations to thread pools using `asyncio.to_thread()`.
    - **`parser_service.py`:** Extracts URLs. Uses `requests` and `BeautifulSoup4` to fetch external pages, falling back to core content tags (`<article>`, `<body>`), while stripping out scripts and repetitive navigation elements.
-   - **`epub_functions.py`:** Wraps the `ebooklib` library to format cleaned HTML/text into valid EPUB file structures.
+   - **`epub_functions.py`:** A custom, low-level, zero-dependency EPUB generator. It builds a valid EPUB 3 structure from scratch using Python's built-in `zipfile` and `xml.sax.saxutils`. It also dynamically generates an SVG cover image (`<svg>`) for the book instead of using external image libraries like `Pillow`.
    - **`dropbox_module.py`:** A custom, lightweight HTTP client for the Dropbox API v2.
+   - **`utils/text_utils.py`:** Provides basic text sanitization, emoji stripping (for safe filenames), and primitive HTML paragraph formatting (`<p>`, `<br>`).
 
 4. **Data Access Layer**
    - **`userbot_db.py`:** Local SQLite database powered by `aiosqlite`. Stores the `username` or numerical IDs of channels tracked by the Userbot.
@@ -63,7 +64,7 @@ The system is built on the **Pyrogram** framework utilizing Python's `asyncio` f
 - **Agent Context:** Both `bot` and `userbot` share a single `asyncio` event loop. This significantly reduces resource overhead, ensures code consistency, and simplifies concurrent programming state (e.g., shared variables natively).
 
 ### 3.2. Asynchronous I/O vs Blocking I/O Isolation
-- **Decision:** Pyrogram and `aiosqlite` rely entirely on `async/await`. However, HTML parsing (`BeautifulSoup`), EPUB compiling (`ebooklib`), and HTTP transfers (`requests` to Dropbox) are natively synchronous.
+- **Decision:** Pyrogram and `aiosqlite` rely entirely on `async/await`. However, HTML parsing (`BeautifulSoup`), EPUB compiling (File I/O), and HTTP transfers (`requests` to Dropbox) are natively synchronous.
 - **Agent Context:** All synchronous functions that take time are strictly offloaded using `asyncio.to_thread()`. *AI Agents should preserve this pattern when adding new heavy processing logic.*
 
 ### 3.3. In-Memory Database Caching
@@ -74,14 +75,20 @@ The system is built on the **Pyrogram** framework utilizing Python's `asyncio` f
 - **Decision:** `PRAGMA journal_mode=WAL;` and `PRAGMA synchronous=NORMAL;` are explicitly enabled in the init phase.
 - **Agent Context:** Crucial for `aiosqlite` to prevent `database is locked` exceptions during concurrent read/write states between the Bot handling Admin commands and the Userbot.
 
-### 3.5. Lightweight Dropbox Integration
-- **Decision:** Bypassed the official `dropbox` Python SDK.
-- **Agent Context:** Official SDK carries heavy dependencies. Dropbox integration is implemented via direct HTTP calls to Content API v2 via `requests`. Keep this minimal approach if extending cloud storage capabilities.
+### 3.5. Zero-Dependency & Lightweight Philosophy
+- **Decision:** Heavy libraries like `ebooklib`, `lxml`, `Pillow`, and the official `dropbox` SDK have been explicitly removed from the project.
+- **Agent Context:** 
+  - **Dropbox** integration is implemented via direct HTTP calls to Content API v2 via `requests`. 
+  - **EPUB** generation leverages the standard `zipfile` library and dynamic SVG covers (`epub_functions.py`), drastically reducing container size and memory usage. Keep this minimal approach if extending capabilities.
 
-### 3.6. QR Code Userbot Authorization
+### 3.6. Infrastructure & Docker Optimization
+- **Decision:** The bot runs in a highly restricted `python:3.11-slim` Docker container.
+- **Agent Context:** `docker-compose.yml` explicitly sets strict resource limits (`mem_limit: 768m`, `cpus: 0.75`). System-level build dependencies (like `gcc`, `libjpeg-dev`) are absent because pure-Python solutions are used instead. Ensure any new Python packages added do not require compilation of C-extensions unless absolutely necessary.
+
+### 3.7. QR Code Userbot Authorization
 - **Decision:** TTY-less authentication. 
 - **Agent Context:** Since the bot runs in a headless Docker environment, traditional CLI-based phone number login fails. Authentication is solved with `login_qr.py`, outputting a session string that is added to `.env`. `qrcode[pil]` should remain an optional/side dependency, not in the core `requirements.txt`.
 
-### 3.7. Session Robustness & Cache Syncing
+### 3.8. Session Robustness & Cache Syncing
 - **Decision:** Mitigation for Telegram's `Peer id invalid` API Error.
 - **Agent Context:** The Userbot cannot forward or interact with channels lacking local peers. A background task `_dialogs_sync_worker` periodically fetches `get_dialogs()` to refresh Pyrogram's internal SQLite session cache, preserving stability for auto-forwarding from newly joined private channels.

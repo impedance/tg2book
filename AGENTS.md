@@ -1,30 +1,64 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Memory Bank First
-Always review the knowledge base in `memory-bank/*.md` before acting on this guide. Those files hold the canonical product vision, technical decisions, and in-flight priorities; refresh them whenever you open `AGENTS.md` so your work aligns with current context.
+## Overview
+tg2book is a Telegram bot that converts Telegram posts and web articles into EPUB format and automatically synchronizes them to a connected Dropbox account for e-readers. It uses a dual Pyrogram client (Bot API + Userbot MTProto) in a single event loop.
 
-## Project Structure & Module Organization
-Core bot logic lives in `bot.py`, delegating EPUB creation to `epub_functions.py` and Dropbox syncing to `dropbox_module.py`. Reusable scripts (`dropbox-loader.py`, `exchange_code.py`) support credential flow. Tests sit in `test_bot.py`, configs in `pytest.ini` and `requirements*.txt`, and operational notes under `memory-bank/`. The `start.sh` wrapper launches the bot with environment variables.
+## Quickstart
+1. **Setup**: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+2. **Config**: Setup `.env` with `TELEGRAM_BOT_TOKEN`, Dropbox secrets, `API_ID` / `API_HASH`. Generate userbot session locally via `pip install "qrcode[pil]" && python3 login_qr.py`.
+3. **Run**: `docker compose up -d --build` (or `make build` / `make run`). Local run: `./start.sh` or `python3 bot.py`.
+4. **Verify**: Send a post link or direct text to the bot in Telegram. Ensure an EPUB is returned and synced to Dropbox.
 
-## Build, Test, and Development Commands
-Всегда работайте в локальном виртуальном окружении: `python -m venv .venv`, затем `source .venv/bin/activate`. После активации устанавливайте зависимости `pip install -r requirements.txt`.
+## Agent Workflow
+1. **Clarify**: Confirm goal and constraints before touching the code. Check docs.
+2. **Plan**: Propose a plan. Group components logically and identify missing tests.
+3. **Implement**: Edit code, maintaining the zero-dependency philosophy (no `ebooklib`, `Pillow`, `lxml`).
+4. **Verify**: Run `make format`, `make lint`, `make typecheck`, and `make test`.
+5. **Summarize**: Present PR-ready output with evidence of passing tests and exact files changed.
 
-Для запуска и разработки используйте `make`:
-- `make run`: Перезапустить контейнер (применит изменения в коде без пересборки).
-- `make test`: Запустить тесты внутри контейнера.
-- `make logs`: Смотреть логи.
-- `make build`: Пересобрать контейнер (если изменились зависимости).
+## Commands
+Run these inside the project root:
+- **Lint**: `make lint` (ruff check)
+- **Format**: `make format` (ruff check --fix && ruff format)
+- **Typecheck**: `make typecheck` (mypy)
+- **Test**: `make test` (pytest inside container)
+- **Run**: `make run` (restarts docker container) / `make build` (rebuilds container)
+- **Smoke test**: *TODO: Create `make smoke` or dedicated smoke test script.*
 
-Запускайте бота через `./start.sh` или `python bot.py`, когда заданы `TELEGRAM_BOT_TOKEN` и Dropbox секреты. Для загрузки файлов в Dropbox используйте `python dropbox-loader.py <local_path>`. Логи смотрите командой `tail -f bot.log`.
+## Repo Map
+- `bot.py`: Main entrypoint; initializes Pyrogram Bot and Userbot in a single event loop.
+- `services/`: Business logic. `epub_service.py` coordinates flow; `parser_service.py` extracts URLs/text.
+- `epub_functions.py`: Zero-dependency EPUB 3 generator (uses `zipfile` and `xml.sax.saxutils`).
+- `dropbox_module.py`: Lightweight HTTP client for Dropbox API v2.
+- `userbot_db.py`: Local `aiosqlite` database for tracking Userbot channels.
+- `docs/`: Deeper documentation.
+- `tests/`: Pytest suite (`test_bot.py`, `test_integration.py`, etc.).
+- `Makefile` & `docker-compose.yml`: Local build/test orchestration.
 
-## Coding Style & Naming Conventions
-Follow PEP 8: four-space indents, snake_case for functions, and CapWords for classes. Keep user-facing copy in Russian to match current responses. Prefer docstrings for public methods and concise logging with the shared `logger`. When touching filters or formatters, mirror existing naming such as `sanitize_filename` and reserve `create_*` for EPUB builders.
+## Rules & Invariants
+- **Zero-Dependency Philosophy**: Do NOT introduce heavy libraries like `ebooklib`, `lxml`, or `Pillow` for core logic.
+- **Async I/O Isolation**: All blocking/synchronous functions (HTML parsing, file I/O, Dropbox requests) MUST be offloaded using `asyncio.to_thread()`.
+- **Database Rules**: Use `aiosqlite` with `PRAGMA journal_mode=WAL;` to prevent lock exceptions.
+- **Userbot Session**: NEVER commit `USERBOT_SESSION_STRING` or `.env` files to version control.
+- **Framework Limits**: Use Pyrogram strictly for both clients (userbot and bot). Do NOT add `python-telegram-bot` or other overlapping frameworks.
+- **Testing**: Tests must use `pytest` async fixtures. Ensure test isolation by mocking Telegram and Dropbox calls.
 
-## Testing Guidelines
-Pytest drives coverage; add new cases in modules named `test_*.py` and functions prefixed with `test_`. Reuse the async fixtures and mocks in `test_bot.py` to isolate Telegram and Dropbox dependencies. Run `pytest` for the suite, `pytest -k <keyword>` to focus, and `pytest --cov` before large refactors. Aim to exercise error paths and media handling branches, updating mocks if new integrations appear.
+## Docs Graph
+- [Architecture](docs/architecture.md): Deep-dive into technical decisions, dual-client setup, and async orchestration.
+- [Tasks](docs/tasks/): Directory containing historical/active task logs.
+- *TODO: Create `docs/index.md` as the main documentation hub.*
+- *TODO: Create `docs/deployment.md` for production setup guidelines.*
+- *TODO: Create `docs/testing.md` for detailed test mock patterns.*
 
-## Commit & Pull Request Guidelines
-Commits are short, imperative phrases (e.g., `update naming`, `fix test`). Scope each commit to a logical change and include relevant tests. Pull requests should describe the bot behavior change, list test evidence (commands run or screenshots of EPUB output), and reference any product briefs in `memory-bank/`. Flag security-sensitive updates (tokens, Dropbox flow) so reviewers can double-check configuration.
-
-## Communication Style
-- Отвечать на вопросы пользователя на русском (если не указано иное) и сохранять дружелюбный рабочий тон.
+## Troubleshooting
+- **Symptom**: `Peer id invalid` on Userbot.
+  - **Check**: Pyrogram session lacks local peer info.
+  - **Command**: Trigger or wait for `_dialogs_sync_worker` to refresh dialogs.
+- **Symptom**: `database is locked` error.
+  - **Check**: Ensure `PRAGMA journal_mode=WAL;` is set and `userbot_db.py` uses asynchronous executing.
+- **Symptom**: Missing module errors during tests.
+  - **Check**: Test-only packages might be missing.
+  - **Command**: `pip install -r requirements-test.txt` or rebuild container.
+- **Symptom**: Userbot cannot login/start.
+  - **Check**: Session string is expired or missing.
+  - **Command**: Run `python3 login_qr.py` locally and update `.env`.
