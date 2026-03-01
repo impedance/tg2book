@@ -29,10 +29,9 @@ DROPBOX_REFRESH_TOKEN - Dropbox refresh token for API access
 ```
 
 ## Technology Stack
-- **python-telegram-bot** - Telegram bot framework
-- **ebooklib** - EPUB generation
-- **beautifulsoup4** - HTML parsing
-- **requests** - HTTP requests and content downloading
+- **pyrogram** - Telegram bot and userbot framework (MTProto)
+- **epub_functions.py** - Custom zero-dependency EPUB 3 generator
+- **requests** - HTTP requests for Dropbox API
 - **Dropbox API** - File storage integration
 
 ## Running the Project

@@ -98,10 +98,9 @@ python3 bot.py
 ## Development
 
 The project uses the following technologies:
-- python-telegram-bot for Telegram bot implementation
-- ebooklib for EPUB generation
-- beautifulsoup4 for HTML parsing
-- requests for content downloading
+- Pyrogram for Telegram bot and userbot implementation
+- Custom zero-dependency EPUB generator (`epub_functions.py`)
+- requests for Dropbox content uploading
 
 ## License
 

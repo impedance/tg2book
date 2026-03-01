@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Overview
-tg2book is a Telegram bot that converts Telegram posts and web articles into EPUB format and automatically synchronizes them to a connected Dropbox account for e-readers. It uses a dual Pyrogram client (Bot API + Userbot MTProto) in a single event loop.
+tg2book is a Telegram bot that converts Telegram posts into EPUB format and automatically synchronizes them to a connected Dropbox account for e-readers. It uses a dual Pyrogram client (Bot API + Userbot MTProto) in a single event loop.
 
 ## Quickstart
 1. **Setup**: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
@@ -27,7 +27,7 @@ Run these inside the project root:
 
 ## Repo Map
 - `bot.py`: Main entrypoint; initializes Pyrogram Bot and Userbot in a single event loop.
-- `services/`: Business logic. `epub_service.py` coordinates flow; `parser_service.py` extracts URLs/text.
+- `services/`: Business logic. `epub_service.py` coordinates EPUB generation and Dropbox uploads.
 - `epub_functions.py`: Zero-dependency EPUB 3 generator (uses `zipfile` and `xml.sax.saxutils`).
 - `dropbox_module.py`: Lightweight HTTP client for Dropbox API v2.
 - `userbot_db.py`: Local `aiosqlite` database for tracking Userbot channels.
@@ -37,7 +37,7 @@ Run these inside the project root:
 
 ## Rules & Invariants
 - **Zero-Dependency Philosophy**: Do NOT introduce heavy libraries like `ebooklib`, `lxml`, or `Pillow` for core logic.
-- **Async I/O Isolation**: All blocking/synchronous functions (HTML parsing, file I/O, Dropbox requests) MUST be offloaded using `asyncio.to_thread()`.
+- **Async I/O Isolation**: All blocking/synchronous functions (file I/O, Dropbox requests) MUST be offloaded using `asyncio.to_thread()`.
 - **Database Rules**: Use `aiosqlite` with `PRAGMA journal_mode=WAL;` to prevent lock exceptions.
 - **Userbot Session**: NEVER commit `USERBOT_SESSION_STRING` or `.env` files to version control.
 - **Framework Limits**: Use Pyrogram strictly for both clients (userbot and bot). Do NOT add `python-telegram-bot` or other overlapping frameworks.

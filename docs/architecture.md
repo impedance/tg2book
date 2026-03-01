@@ -8,13 +8,13 @@
 ## 1. Product Specifications
 
 ### Core Product Description
-A Telegram bot designed to convert Telegram posts and external web articles (from URLs within posts) into **EPUB** format. The generated EPUB files are automatically synchronized to a connected **Dropbox** account, allowing seamless integration with e-readers (e.g., PocketBook).
+A Telegram bot designed to convert Telegram posts into **EPUB** format. The generated EPUB files are automatically synchronized to a connected **Dropbox** account, allowing seamless integration with e-readers (e.g., PocketBook).
 
 ### Key Supported Use Cases
 
 1. **Interactive Mode (Manual Forwarding & Text Input)**
    - **Trigger:** User forwards a text post from any channel/chat or sends direct text.
-   - **Action:** Bot extracts text and URLs, converts content to EPUB, sends the file back to the user via Telegram, and uploads it to Dropbox.
+   - **Action:** Bot extracts the message text, converts it to EPUB, sends the file back to the user via Telegram, and uploads it to Dropbox.
 
 2. **Direct EPUB File Uploads**
    - **Trigger:** User sends a pre-generated `.epub` document.
@@ -46,8 +46,7 @@ The system is built on the **Pyrogram** framework utilizing Python's `asyncio` f
    - A background worker (`_channel_worker`) consumes events sequentially. This manages traffic spikes and prevents rate limits/bans from Dropbox and EPUB generation constraints by limiting concurrency to `1`.
 
 3. **Business Logic / Services Layer**
-   - **`epub_service.py`:** The main coordinator. Orchestrates parsing, EPUB generation, and Dropbox uploads. Offloads blocking synchronous operations to thread pools using `asyncio.to_thread()`.
-   - **`parser_service.py`:** Extracts URLs. Uses `requests` and `BeautifulSoup4` to fetch external pages, falling back to core content tags (`<article>`, `<body>`), while stripping out scripts and repetitive navigation elements.
+   - **`epub_service.py`:** The main coordinator. Orchestrates EPUB generation and Dropbox uploads. Offloads blocking synchronous operations to thread pools using `asyncio.to_thread()`.
    - **`epub_functions.py`:** A custom, low-level, zero-dependency EPUB generator. It builds a valid EPUB 3 structure from scratch using Python's built-in `zipfile` and `xml.sax.saxutils`. It also dynamically generates an SVG cover image (`<svg>`) for the book instead of using external image libraries like `Pillow`.
    - **`dropbox_module.py`:** A custom, lightweight HTTP client for the Dropbox API v2.
    - **`utils/text_utils.py`:** Provides basic text sanitization, emoji stripping (for safe filenames), and primitive HTML paragraph formatting (`<p>`, `<br>`).
@@ -64,7 +63,7 @@ The system is built on the **Pyrogram** framework utilizing Python's `asyncio` f
 - **Agent Context:** Both `bot` and `userbot` share a single `asyncio` event loop. This significantly reduces resource overhead, ensures code consistency, and simplifies concurrent programming state (e.g., shared variables natively).
 
 ### 3.2. Asynchronous I/O vs Blocking I/O Isolation
-- **Decision:** Pyrogram and `aiosqlite` rely entirely on `async/await`. However, HTML parsing (`BeautifulSoup`), EPUB compiling (File I/O), and HTTP transfers (`requests` to Dropbox) are natively synchronous.
+- **Decision:** Pyrogram and `aiosqlite` rely entirely on `async/await`. However, EPUB compiling (File I/O) and HTTP transfers (`requests` to Dropbox) are natively synchronous.
 - **Agent Context:** All synchronous functions that take time are strictly offloaded using `asyncio.to_thread()`. *AI Agents should preserve this pattern when adding new heavy processing logic.*
 
 ### 3.3. In-Memory Database Caching
