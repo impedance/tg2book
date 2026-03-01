@@ -614,47 +614,36 @@ def main() -> None:
 
     converter = TelegramToEpub()
 
-    # Регистрируем обработчики для bot_client
-    bot_client.add_handler(
-        __import__("pyrogram.handlers", fromlist=["MessageHandler"]).MessageHandler(
-            converter.cmd_start,
-            pyro_filters.command("start") & pyro_filters.private,
-        )
-    )
-    bot_client.add_handler(
-        __import__("pyrogram.handlers", fromlist=["MessageHandler"]).MessageHandler(
-            converter.cmd_help,
-            pyro_filters.command("help") & pyro_filters.private,
-        )
-    )
-    bot_client.add_handler(
-        __import__("pyrogram.handlers", fromlist=["MessageHandler"]).MessageHandler(
-            converter.cmd_add_channel,
-            pyro_filters.command("add_channel") & is_admin,
-        )
-    )
-    bot_client.add_handler(
-        __import__("pyrogram.handlers", fromlist=["MessageHandler"]).MessageHandler(
-            converter.cmd_del_channel,
-            pyro_filters.command("del_channel") & is_admin,
-        )
-    )
-    bot_client.add_handler(
-        __import__("pyrogram.handlers", fromlist=["MessageHandler"]).MessageHandler(
-            converter.cmd_list_channels,
-            pyro_filters.command("list_channels") & is_admin,
-        )
-    )
-    bot_client.add_handler(
-        __import__("pyrogram.handlers", fromlist=["MessageHandler"]).MessageHandler(
-            converter.handle_message,
-            pyro_filters.private & ~pyro_filters.command(
-                ["start", "help", "add_channel", "del_channel", "list_channels"]
-            ),
-        )
-    )
+
 
     async def run() -> None:
+        # Регистрируем обработчики для bot_client внутри работающего event loop
+        MessageHandler = __import__("pyrogram.handlers", fromlist=["MessageHandler"]).MessageHandler
+        
+        bot_client.add_handler(
+            MessageHandler(converter.cmd_start, pyro_filters.command("start") & pyro_filters.private)
+        )
+        bot_client.add_handler(
+            MessageHandler(converter.cmd_help, pyro_filters.command("help") & pyro_filters.private)
+        )
+        bot_client.add_handler(
+            MessageHandler(converter.cmd_add_channel, pyro_filters.command("add_channel") & is_admin)
+        )
+        bot_client.add_handler(
+            MessageHandler(converter.cmd_del_channel, pyro_filters.command("del_channel") & is_admin)
+        )
+        bot_client.add_handler(
+            MessageHandler(converter.cmd_list_channels, pyro_filters.command("list_channels") & is_admin)
+        )
+        bot_client.add_handler(
+            MessageHandler(
+                converter.handle_message,
+                pyro_filters.private & ~pyro_filters.command(
+                    ["start", "help", "add_channel", "del_channel", "list_channels"]
+                ),
+            )
+        )
+
         await bot_client.start()
         logger.info("Bot client запущен")
 

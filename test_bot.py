@@ -83,58 +83,53 @@ class TestBuildEpubZip:
 
 class TestTelegramToEpub:
     @pytest.fixture
-    def mock_update(self):
-        update = MagicMock()
-        update.message = MagicMock()
-        update.message.reply_text = AsyncMock()
-        update.message.reply_document = AsyncMock()
-        update.message.delete = AsyncMock()
-        update.message.chat.id = 12345
-        update.message.text = None
-        update.message.caption = None
-        update.message.document = None
-        update.message.forward_origin = None
-        return update
+    def mock_message(self):
+        msg = MagicMock()
+        msg.reply = AsyncMock()
+        msg.reply_document = AsyncMock()
+        msg.delete = AsyncMock()
+        msg.chat.id = 12345
+        msg.text = None
+        msg.caption = None
+        msg.document = None
+        msg.forward_date = None
+        msg.forward_from = None
+        msg.forward_from_chat = None
+        msg.forward_sender_name = None
+        return msg
 
     @pytest.fixture
-    def mock_context(self):
-        ctx = MagicMock()
-        ctx.bot = MagicMock()
-        ctx.bot.get_file = AsyncMock()
-        return ctx
+    def mock_client(self):
+        client = MagicMock()
+        client.download_media = AsyncMock(return_value="dummy.epub")
+        return client
 
     @pytest.mark.asyncio
     @patch("services.epub_service.process_text_to_epub", new_callable=AsyncMock)
-    async def test_handle_forwarded_message_success(self, mock_process, mock_update, mock_context):
-        mock_update.message.text = "Hello"
-        mock_update.message.forward_origin = MagicMock()
+    async def test_handle_forwarded_message_success(self, mock_process, mock_client, mock_message):
+        mock_message.text = "Hello"
+        mock_message.forward_date = MagicMock()
         mock_process.return_value = "<b>Done</b>"
 
         converter = TelegramToEpub()
-        converter.processing_semaphore = AsyncMock()
-        converter.processing_semaphore.__aenter__ = AsyncMock()
-        converter.processing_semaphore.__aexit__ = AsyncMock()
 
-        await converter.handle_message(mock_update, mock_context)
-        assert mock_update.message.reply_text.called
-        assert mock_update.message.delete.called
+        await converter.handle_message(mock_client, mock_message)
+        assert mock_message.reply.called
+        assert mock_message.delete.called
 
     @pytest.mark.asyncio
     @patch("services.epub_service.process_file_to_dropbox", new_callable=AsyncMock)
-    async def test_handle_epub_document(self, mock_process, mock_update, mock_context):
+    async def test_handle_epub_document(self, mock_process, mock_client, mock_message):
         doc = MagicMock()
         doc.file_name = "test.epub"
         doc.mime_type = "application/epub+zip"
-        mock_update.message.document = doc
+        mock_message.document = doc
         mock_process.return_value = True
 
         converter = TelegramToEpub()
-        converter.processing_semaphore = AsyncMock()
-        converter.processing_semaphore.__aenter__ = AsyncMock()
-        converter.processing_semaphore.__aexit__ = AsyncMock()
 
-        await converter.handle_message(mock_update, mock_context)
-        assert mock_update.message.reply_document.called
+        await converter.handle_message(mock_client, mock_message)
+        assert mock_message.reply_document.called
         # Verify Dropbox upload service was also called (acceptance criteria 3.8)
         mock_process.assert_called_once()
 
