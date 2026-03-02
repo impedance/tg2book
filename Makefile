@@ -4,8 +4,16 @@ COMPOSE_BASE = docker compose -f docker-compose.yml
 COMPOSE_DEV = $(COMPOSE_BASE) -f docker-compose.dev.yml
 COMPOSE_PROD = $(COMPOSE_BASE) -f docker-compose.prod.yml
 DOCKER_PYTHON = $(COMPOSE_DEV) exec tg2book python -m
+USE_DOCKER ?= 1
+ARTIFACTS_DIR ?= artifacts
 
-.PHONY: run stop down login-userbot test smoke agent-smoke epub-validate preflight logs build up prod-build prod-up prod-logs prod-down typecheck format lint
+ifeq ($(USE_DOCKER),1)
+PY_RUN = $(DOCKER_PYTHON)
+else
+PY_RUN = $(PYTHON) -m
+endif
+
+.PHONY: run stop down login-userbot test smoke agent-smoke epub-validate preflight logs build up prod-build prod-up prod-logs prod-down typecheck format lint structural
 
 run:
 	$(COMPOSE_DEV) up -d tg2book
@@ -23,17 +31,24 @@ login-userbot:
 	$(PYTHON) login_userbot.py
 
 test:
-	$(DOCKER_PYTHON) pytest tests
+	@mkdir -p "$(ARTIFACTS_DIR)"
+	$(PY_RUN) pytest tests --junitxml="$(ARTIFACTS_DIR)/pytest.xml"
 
-smoke:
-	$(DOCKER_PYTHON) ruff check .
-	$(DOCKER_PYTHON) pytest \
+structural:
+	@bash tools/structural_check.sh
+
+smoke: structural
+	$(PY_RUN) ruff check .
+	@mkdir -p "$(ARTIFACTS_DIR)"
+	$(PY_RUN) pytest \
 		tests/test_optimization.py \
 		tests/test_epub_golden.py \
-		tests/test_epub_service_guardrails.py
+		tests/test_epub_service_guardrails.py \
+		--junitxml="$(ARTIFACTS_DIR)/pytest-smoke.xml"
 
 agent-smoke: smoke
-	$(DOCKER_PYTHON) pytest tests/test_integration.py
+	@mkdir -p "$(ARTIFACTS_DIR)"
+	$(PY_RUN) pytest tests/test_integration.py --junitxml="$(ARTIFACTS_DIR)/pytest-agent-smoke.xml"
 
 epub-validate:
 	@test -n "$(FILE)" || (echo "Usage: make epub-validate FILE=path/to/book.epub" && exit 2)
@@ -58,7 +73,7 @@ prod-down:
 	$(COMPOSE_PROD) down
 
 typecheck:
-	$(DOCKER_PYTHON) mypy \
+	$(PY_RUN) mypy \
 		bot.py \
 		config.py \
 		dropbox_module.py \
@@ -69,9 +84,9 @@ typecheck:
 		src
 
 format:
-	$(DOCKER_PYTHON) ruff check --fix . && $(DOCKER_PYTHON) ruff format .
+	$(PY_RUN) ruff check --fix . && $(PY_RUN) ruff format .
 
 lint:
-	$(DOCKER_PYTHON) ruff check .
+	$(PY_RUN) ruff check .
 
-preflight: format lint typecheck test
+preflight: structural format lint typecheck test

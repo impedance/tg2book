@@ -10,6 +10,11 @@
 - `make test` — full automated pytest suite in the dev container.
 - `make preflight` — formatting, lint, typing, and full tests before handoff.
 
+## Host-mode (no Docker)
+If you have a local `.venv` with deps installed, you can run the same loops without Docker:
+- `make smoke USE_DOCKER=0`
+- `make preflight USE_DOCKER=0`
+
 ## Project Testing Rules
 - Never perform real network I/O in tests; mock Telegram, Pyrogram, and Dropbox surfaces.
 - Preserve the async boundary: blocking file or Dropbox work should be verified through `asyncio.to_thread()`.
