@@ -231,6 +231,58 @@ async def test_filter_rejects_after_del_channel(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Test 4 — приватный канал через инвайт: резолв в числовой ID
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_filter_accepts_private_channel_after_invite_resolve(tmp_path):
+    """
+    Если /add_channel получает инвайт-ссылку приватного канала, а юзербот
+    может её разрешить в числовой chat.id, то в БД сохраняется именно ID и
+    фильтр начинает пропускать сообщения даже без username.
+    """
+    import userbot_db
+
+    original_path = userbot_db.DB_PATH
+    userbot_db.DB_PATH = tmp_path / "test.sqlite"
+    await userbot_db.init_db()
+
+    converter = TelegramToEpub()
+    await converter._load_channels_cache()
+
+    # Attach a fake running userbot that can resolve invite links
+    fake_userbot = MagicMock()
+    fake_userbot.get_chat = AsyncMock()
+    chat = MagicMock()
+    chat.id = -100777888999
+    chat.title = "Secret Channel"
+    fake_userbot.get_chat.return_value = chat
+    converter._userbot = fake_userbot
+
+    # Admin adds channel via invite link
+    msg = _make_message(user_id=42)
+    msg.command = ["add_channel", "https://t.me/+AbCdEfGhIj"]
+    client = MagicMock()
+
+    with patch("bot.settings") as s:
+        s.ADMIN_ID = 42
+        await converter.cmd_add_channel(client, msg)
+
+    channels = await userbot_db.get_channels()
+    assert str(chat.id) in channels
+
+    filt = _get_filter_func(converter)
+    pyro_msg = _make_pyro_message(chat_id=chat.id, username=None, text="private post")
+    assert filt(None, None, pyro_msg) is True
+
+    call_text = msg.reply.call_args[0][0]
+    assert "✅" in call_text
+
+    userbot_db.DB_PATH = original_path
+
+
+# ---------------------------------------------------------------------------
 # Test 4 (план 2.5) — антихрупкость фильтра (Missing Attributes)
 # ---------------------------------------------------------------------------
 

@@ -44,8 +44,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# Глушим многословные сетевые библиотеки
-logging.getLogger("pyrogram").setLevel(logging.WARNING)
+# Diagnostics toggles (safe to leave enabled in production; default is off)
+_debug_updates = os.environ.get("TG2BOOK_DEBUG_UPDATES", "").strip() in {"1", "true", "yes", "on"}
+
+# Глушим многословные сетевые библиотеки (включаем при диагностике)
+logging.getLogger("pyrogram").setLevel(logging.INFO if _debug_updates else logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("aiosqlite").setLevel(logging.WARNING)
@@ -340,8 +343,8 @@ class TelegramToEpub:
             "2. Перешлите его мне\n"
             "3. Я создам EPUB файл и отправлю его вам\n\n"
             "Команды управления каналами (только для администратора):\n"
-            "/add_channel @username — добавить канал для отслеживания\n"
-            "/del_channel @username — удалить канал\n"
+            "/add_channel <@username|id|invite-link> — добавить канал для отслеживания\n"
+            "/del_channel <@username|id|invite-link> — удалить канал\n"
             "/list_channels — список отслеживаемых каналов"
         )
         await message.reply(text)
@@ -350,41 +353,107 @@ class TelegramToEpub:
         """Handle /add_channel command (admin only)."""
         args = message.command[1:] if message.command else []
         if not args:
-            await message.reply("Использование: /add_channel <@username или username>")
+            await message.reply(
+                "Использование: /add_channel <@username | -100... | https://t.me/+...>"
+            )
             return
 
         from userbot_db import add_channel as db_add_channel
 
-        username = args[0].lstrip("@").lower()
-        added = await db_add_channel(username)
+        target_raw = args[0].strip()
+        target_norm = target_raw.lstrip("@").strip()
+        if not target_norm:
+            await message.reply("❌ Пустой аргумент. Пример: /add_channel @username")
+            return
+
+        store_key = target_norm.lower()
+        resolved_title: str | None = None
+        resolved_id: str | None = None
+
+        if self._userbot:
+            try:
+                chat = await self._userbot.get_chat(target_raw)
+                resolved_title = getattr(chat, "title", None) or getattr(chat, "username", None)
+                resolved_id = str(getattr(chat, "id", ""))
+                if resolved_id.lstrip("-").isdigit():
+                    store_key = resolved_id
+            except Exception as e:
+                logger.warning(
+                    f"Не удалось разрешить канал через userbot.get_chat({target_raw!r}): {e}"
+                )
+
+        added = await db_add_channel(store_key)
         if added:
-            if username.lstrip("-").isdigit():
-                self._monitored_channels_cache["ids"].add(username)
+            if store_key.lstrip("-").isdigit():
+                self._monitored_channels_cache["ids"].add(store_key)
             else:
-                self._monitored_channels_cache["usernames"].add(username)
-            await message.reply(f"✅ Канал @{username} добавлен в список отслеживания.")
+                self._monitored_channels_cache["usernames"].add(store_key)
+
+            if resolved_id and resolved_title:
+                await message.reply(
+                    f'✅ Канал "{resolved_title}" (ID: {resolved_id}) добавлен в список отслеживания.'
+                )
+            elif store_key.lstrip("-").isdigit():
+                await message.reply(f"✅ Канал с ID {store_key} добавлен в список отслеживания.")
+            else:
+                await message.reply(f"✅ Канал @{store_key} добавлен в список отслеживания.")
+        elif store_key.lstrip("-").isdigit():
+            await message.reply(f"ℹ️ Канал с ID {store_key} уже в списке.")
         else:
-            await message.reply(f"ℹ️ Канал @{username} уже в списке.")
+            await message.reply(f"ℹ️ Канал @{store_key} уже в списке.")
 
     async def cmd_del_channel(self, client: Client, message: Message) -> None:
         """Handle /del_channel command (admin only)."""
         args = message.command[1:] if message.command else []
         if not args:
-            await message.reply("Использование: /del_channel <@username или username>")
+            await message.reply(
+                "Использование: /del_channel <@username | -100... | https://t.me/+...>"
+            )
             return
 
         from userbot_db import remove_channel as db_remove_channel
 
-        username = args[0].lstrip("@").lower()
-        removed = await db_remove_channel(username)
+        target_raw = args[0].strip()
+        target_norm = target_raw.lstrip("@").strip()
+        if not target_norm:
+            await message.reply("❌ Пустой аргумент. Пример: /del_channel @username")
+            return
+
+        store_key = target_norm.lower()
+        resolved_title: str | None = None
+        resolved_id: str | None = None
+
+        if self._userbot:
+            try:
+                chat = await self._userbot.get_chat(target_raw)
+                resolved_title = getattr(chat, "title", None) or getattr(chat, "username", None)
+                resolved_id = str(getattr(chat, "id", ""))
+                if resolved_id.lstrip("-").isdigit():
+                    store_key = resolved_id
+            except Exception as e:
+                logger.warning(
+                    f"Не удалось разрешить канал через userbot.get_chat({target_raw!r}) для удаления: {e}"
+                )
+
+        removed = await db_remove_channel(store_key)
         if removed:
-            if username.lstrip("-").isdigit():
-                self._monitored_channels_cache["ids"].discard(username)
+            if store_key.lstrip("-").isdigit():
+                self._monitored_channels_cache["ids"].discard(store_key)
             else:
-                self._monitored_channels_cache["usernames"].discard(username)
-            await message.reply(f"✅ Канал @{username} удалён из списка.")
+                self._monitored_channels_cache["usernames"].discard(store_key)
+
+            if resolved_id and resolved_title:
+                await message.reply(
+                    f'✅ Канал "{resolved_title}" (ID: {resolved_id}) удалён из списка.'
+                )
+            elif store_key.lstrip("-").isdigit():
+                await message.reply(f"✅ Канал с ID {store_key} удалён из списка.")
+            else:
+                await message.reply(f"✅ Канал @{store_key} удалён из списка.")
+        elif store_key.lstrip("-").isdigit():
+            await message.reply(f"ℹ️ Канал с ID {store_key} не найден в списке.")
         else:
-            await message.reply(f"ℹ️ Канал @{username} не найден в списке.")
+            await message.reply(f"ℹ️ Канал @{store_key} не найден в списке.")
 
     async def cmd_list_channels(self, client: Client, message: Message) -> None:
         """Handle /list_channels command (admin only)."""
@@ -421,7 +490,6 @@ class TelegramToEpub:
             "forward_from",
             "forward_from_chat",
             "forward_sender_name",
-            "forward_origin",
         ]
         forward_values = {attr: getattr(message, attr, None) for attr in forward_attrs}
         logger.info(f"Атрибуты пересылки: {forward_values}")
@@ -583,10 +651,9 @@ class TelegramToEpub:
             logger.info(f"Извлечен источник из forward_sender_name: {message.forward_sender_name}")
             return message.forward_sender_name
 
-        if getattr(message, "forward_origin", None):
-            logger.info(
-                f"Найден атрибут forward_origin: {message.forward_origin}, но он не обрабатывается!"
-            )
+        if getattr(message, "forward_date", None):
+            logger.info("Источник скрыт настройками приватности, помечаем как 'Forwarded'")
+            return "Forwarded"
 
         logger.info("Источник не определен, возвращаем 'Unknown Source'")
         return "Unknown Source"
@@ -603,11 +670,6 @@ class TelegramToEpub:
             link = f"https://t.me/{chat.username}/{message_id}"
             logger.info(f"Сформирована ссылка: {link}")
             return link
-
-        if getattr(message, "forward_origin", None):
-            logger.info(
-                f"Найден атрибут forward_origin при попытке создать ссылку: {message.forward_origin}"
-            )
 
         logger.info("Ссылка не сформирована")
         return ""
@@ -657,8 +719,42 @@ def main() -> None:
     converter = TelegramToEpub()
 
     async def run() -> None:
+        loop = asyncio.get_running_loop()
+
+        def _asyncio_exception_handler(_loop, context) -> None:  # type: ignore[no-untyped-def]
+            exc = context.get("exception")
+            fut = context.get("future") or context.get("task")
+            coro = getattr(fut, "get_coro", lambda: None)()
+            coro_name = getattr(coro, "__qualname__", None) or getattr(coro, "__name__", None)
+
+            if (
+                exc
+                and isinstance(exc, ValueError)
+                and "Peer id invalid" in str(exc)
+                and coro_name == "Client.handle_updates"
+            ):
+                logger.error(
+                    "Pyrogram updates task crashed (%s). Exiting so Docker can restart the bot.",
+                    exc,
+                )
+                os._exit(2)
+
+            if exc:
+                logger.error(
+                    "Unhandled asyncio exception: %s", context.get("message"), exc_info=exc
+                )
+            else:
+                logger.error("Unhandled asyncio exception: %s", context.get("message"))
+
+        loop.set_exception_handler(_asyncio_exception_handler)
+
         # Регистрируем обработчики для bot_client внутри работающего event loop
         MessageHandler = __import__("pyrogram.handlers", fromlist=["MessageHandler"]).MessageHandler
+        RawUpdateHandler = None
+        if _debug_updates:
+            RawUpdateHandler = __import__(
+                "pyrogram.handlers", fromlist=["RawUpdateHandler"]
+            ).RawUpdateHandler
 
         bot_client.add_handler(
             MessageHandler(
@@ -693,8 +789,32 @@ def main() -> None:
             )
         )
 
+        if _debug_updates and RawUpdateHandler:
+
+            def _raw_update_logger(client, update, users, chats) -> None:  # type: ignore[no-untyped-def]
+                logger.debug(
+                    "Raw update received: client=%s update=%s users=%s chats=%s",
+                    getattr(client, "name", "?"),
+                    type(update).__name__,
+                    len(users) if users else 0,
+                    len(chats) if chats else 0,
+                )
+
+            bot_client.add_handler(RawUpdateHandler(_raw_update_logger), group=-1)
+            userbot_client.add_handler(RawUpdateHandler(_raw_update_logger), group=-1)
+            logger.info("TG2BOOK_DEBUG_UPDATES=1: RawUpdateHandler enabled for bot and userbot")
+
         await bot_client.start()
-        logger.info("Bot client запущен")
+        bot_me = await bot_client.get_me()
+        logger.info(f"Bot client запущен как @{bot_me.username} (id={bot_me.id})")
+
+        # Принудительно кэшируем диалоги и peers бота, чтобы уменьшить шанс "Peer id invalid"
+        try:
+            async for _ in bot_client.get_dialogs():
+                pass
+            logger.info("Кэш диалогов bot-client успешно обновлен.")
+        except Exception as e:
+            logger.warning(f"Не удалось обновить кэш диалогов bot-client при старте: {e}")
 
         await converter.start(bot_client)
 

@@ -13,11 +13,12 @@ tg2book is a Telegram bot that converts Telegram posts into EPUB format and auto
 1. **Clarify**: Confirm goal and constraints before touching the code. Check docs.
 2. **Plan**: Propose a plan. Group components logically and identify missing tests.
 3. **Implement**: Edit code, maintaining the zero-dependency philosophy (no `ebooklib`, `Pillow`, `lxml`).
-4. **Verify**: Run `make smoke` for fast iteration, then `make preflight` before handoff.
+4. **Verify**: Run `make smoke` for fast iteration, then `make agent-smoke` (offline black-box), then `make preflight` before handoff.
 5. **Summarize**: Present PR-ready output with evidence of passing tests and exact files changed.
 
 ## Fast paths for agents
 - **Fast feedback**: `make smoke`
+- **Offline black-box**: `make agent-smoke`
 - **Full verification**: `make preflight`
 
 ## Commands
@@ -51,10 +52,12 @@ Run these inside the project root:
 - **Linting Philosophy**: Keep lint low-noise and high-signal; prefer targeted guardrails over broad rule churn.
 
 ## Docs Graph
+- [Docs Hub](docs/index.md): “system of record” index for humans and agents.
 - [Architecture](docs/architecture.md): Deep-dive into technical decisions, dual-client setup, and async orchestration.
 - [Testing](docs/testing.md): Test patterns, mocking guidance, and offline regression rules.
+- [Runbook](docs/RUNBOOK.md): Operational debugging and common incidents.
+- [Deploy](docs/DEPLOY.md): Deployment and environment notes.
 - [Tasks](docs/tasks/): Directory containing historical/active task logs.
-- *TODO: Create `docs/index.md` as the main documentation hub.*
 - *TODO: Create `docs/deployment.md` for production setup guidelines.*
 
 ## Troubleshooting

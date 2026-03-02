@@ -5,7 +5,7 @@ COMPOSE_DEV = $(COMPOSE_BASE) -f docker-compose.dev.yml
 COMPOSE_PROD = $(COMPOSE_BASE) -f docker-compose.prod.yml
 DOCKER_PYTHON = $(COMPOSE_DEV) exec tg2book python -m
 
-.PHONY: run stop down login-userbot test smoke preflight logs build up prod-build prod-up prod-logs prod-down typecheck format lint
+.PHONY: run stop down login-userbot test smoke agent-smoke epub-validate preflight logs build up prod-build prod-up prod-logs prod-down typecheck format lint
 
 run:
 	$(COMPOSE_DEV) up -d tg2book
@@ -31,6 +31,13 @@ smoke:
 		tests/test_optimization.py \
 		tests/test_epub_golden.py \
 		tests/test_epub_service_guardrails.py
+
+agent-smoke: smoke
+	$(DOCKER_PYTHON) pytest tests/test_integration.py
+
+epub-validate:
+	@test -n "$(FILE)" || (echo "Usage: make epub-validate FILE=path/to/book.epub" && exit 2)
+	$(COMPOSE_DEV) exec tg2book python utils/epub_validate.py "$(FILE)"
 
 logs:
 	$(COMPOSE_DEV) logs -f tg2book
