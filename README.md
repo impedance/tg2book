@@ -114,6 +114,7 @@ make build
 make run
 make logs
 make test
+make userbot-login
 ```
 
 Что делают команды:
@@ -122,6 +123,9 @@ make test
 - `make run` — поднимает оба сервиса без принудительного rebuild.
 - `make logs` — показывает логи обоих сервисов.
 - `make test` — запускает `pytest` внутри контейнера `tg2book`.
+- `make userbot-login` — одноразовая интерактивная авторизация Telethon и создание session в `runtime/`.
+
+Если `runtime/tg2book_userbot.session` ещё нет, сервис `tg2book-userbot` не падает в цикл рестартов, а остаётся в idle-режиме и пишет в лог, что нужно выполнить `make userbot-login`.
 
 ## Проверка после старта
 

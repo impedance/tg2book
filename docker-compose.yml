@@ -20,7 +20,7 @@ services:
     environment:
       CHANNEL_REGISTRY_DB: ${CHANNEL_REGISTRY_DB:-/app/runtime/channels.db}
       USERBOT_SESSION: ${USERBOT_SESSION:-/app/runtime/tg2book_userbot}
-    command: ["python", "userbot_listener.py"]
+    command: ["sh", "/app/docker-userbot-entrypoint.sh"]
     volumes:
       - ./runtime:/app/runtime
     restart: unless-stopped

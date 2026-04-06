@@ -68,6 +68,12 @@ nano .env
 docker compose up -d --build
 ```
 
+Если это первый запуск userbot и session ещё нет, выполни одноразовую авторизацию:
+
+```bash
+make userbot-login
+```
+
 5. Проверить статус:
 
 ```bash
@@ -107,7 +113,11 @@ docker compose up -d
 3. Убедиться, что session-файл сохранился.
 4. После этого обычный `docker compose up -d` сможет переиспользовать сессию.
 
-Минус: session-файл должен переживать пересборки и быть доступным контейнеру.
+Практически это делается штатно через:
+
+```bash
+make userbot-login
+```
 
 ### Вариант B. Подложить готовый session-файл
 
@@ -126,6 +136,7 @@ make build
 make run
 make logs
 make test
+make userbot-login
 ```
 
 Либо напрямую:

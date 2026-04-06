@@ -35,6 +35,12 @@ make logs-userbot
 make test
 ```
 
+Одноразовый bootstrap userbot session:
+
+```bash
+make userbot-login
+```
+
 Прямые docker compose команды:
 
 ```bash
@@ -70,6 +76,7 @@ docker compose logs -f --tail=100 tg2book-userbot
 
 - `tg2book` не падает сразу после старта.
 - `tg2book-userbot` не падает на проверке env и session.
+- если session ещё нет, `tg2book-userbot` должен перейти в idle и попросить выполнить `make userbot-login`, а не уйти в restart-loop.
 - В логах нет повторяющихся ошибок авторизации Telegram/Dropbox.
 
 ## Рабочий сценарий администратора
