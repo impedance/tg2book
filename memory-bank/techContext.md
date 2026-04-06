@@ -2,45 +2,67 @@
 
 ## Technologies Used
 
-*   Python 3.x
-*   python-telegram-bot 20.7
-*   ebooklib 0.17.1
-*   tempfile (for temporary directory management)
-*   shutil (for file operations)
+- Python 3.11 in Docker image
+- `python-telegram-bot==20.7`
+- `Telethon==1.36.0`
+- `ebooklib==0.17.1`
+- `dropbox==11.36.2`
+- `requests==2.31.0`
+- `beautifulsoup4==4.12.2`
+- `lxml==4.9.3`
+- `Pillow==10.1.0`
+- SQLite via stdlib `sqlite3`
+- Docker / Docker Compose
 
-## Development Setup
+## Runtime Entry Points
 
-1.  Install Python 3.x.
-2.  Install the required libraries: `pip install -r requirements.txt`
-3.  Create a Telegram bot and obtain its API token.
-4.  Set the API token as an environment variable: `export TELEGRAM_BOT_TOKEN="your_token_here"`
-5.  Run the bot: `python bot.py`
+- `bot.py` — polling bot for user chat interactions.
+- `userbot_listener.py` — Telethon listener for channel ingestion.
+- `start.sh` — локальный запуск bot с `.venv` и `.env`.
+- `start_userbot.sh` — локальный запуск userbot с `.venv` и `.env`.
+
+## Runtime State
+
+- `runtime/channels.db` — SQLite registry of monitored channels in Docker runtime.
+- `runtime/tg2book_userbot.session` — Telethon session file in Docker runtime.
+- `bot.log`, `userbot.log` — локальные лог-файлы при shell-старте.
+
+## Required Environment Variables
+
+For main bot:
+
+- `TELEGRAM_BOT_TOKEN`
+- `DROPBOX_APP_KEY`
+- `DROPBOX_APP_SECRET`
+- `DROPBOX_REFRESH_TOKEN`
+
+For admin/userbot flow:
+
+- `ADMIN_ID`
+- `API_ID`
+- `API_HASH`
+
+Optional:
+
+- `USERBOT_SESSION`
+- `CHANNEL_REGISTRY_DB`
 
 ## Technical Constraints
 
-*   Telegram API rate limits.
-*   EPUB format limitations.
-*   Handling different types of forwarded messages.
-*   Proper cleanup of temporary files.
+- Telegram Bot API and Telethon session handling require valid credentials and network access.
+- Dropbox upload depends on refresh-token flow and external API availability.
+- Userbot currently ignores channel posts without text.
+- Docker runtime persists `channels.db` and `*.session` through bind mount `./runtime:/app/runtime`.
 
-## Dependencies
+## Testing Setup
 
-*   python-telegram-bot==20.7
-*   ebooklib==0.17.1
-*   requests==2.31.0
-*   beautifulsoup4==4.12.2
-*   lxml==4.9.3
-*   Pillow==10.1.0
+- `pytest`
+- `pytest-asyncio`
+- `pytest-cov`
 
-## Testing Dependencies
+Key test files:
 
-*   pytest
-*   pytest-asyncio
-*   pytest-cov
-
-## Tool Usage Patterns
-
-*   VS Code for development.
-*   Git for version control.
-*   Telegram for testing the bot.
-*   pytest for running tests.
+- `test_bot.py`
+- `tests/test_channel_registry.py`
+- `tests/test_userbot_listener.py`
+- `tests/test_dropbox_pipeline_baseline.py`

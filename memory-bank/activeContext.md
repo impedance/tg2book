@@ -2,27 +2,46 @@
 
 ## Current Focus
 
-Текущий фокус смещён на итеративный план интеграции userbot:
+Текущий фокус проекта уже не в проектировании userbot-интеграции, а в стабилизации и эксплуатации существующей связки:
 
-1. Зафиксировать baseline существующего pipeline:
-   - `сообщение -> EPUB -> Dropbox -> ответ пользователю`.
-2. Добавлять userbot-часть только после усиления тестовой защиты Dropbox-пути.
+1. `bot.py` как основной пользовательский вход.
+2. `userbot_listener.py` как channel-ingestion sidecar.
+3. SQLite-реестр `runtime/channels.db` и admin-команды для управления каналами.
+4. Dropbox pipeline как критический delivery path.
+
+## Current Reality
+
+- В проекте уже есть internal processing seam:
+  - `_process_text_to_dropbox(...)`
+- Userbot уже подключён и вызывает:
+  - `TelegramToEpub.process_channel_post(...)`
+- Реестр каналов уже вынесен в:
+  - `channel_registry.py`
+- Есть baseline-тесты критического Dropbox pipeline:
+  - `tests/test_dropbox_pipeline_baseline.py`
 
 ## Recent Changes
 
-- Подготовлен план поэтапной интеграции в `docs/tasks/userbot_iterative_integration_plan.md`.
-- В Phase 0 добавлен аудит текущих тестов: `docs/tasks/phase0_test_audit.md`.
-- Добавлен baseline набор black-box тестов Dropbox pipeline:
-  - `tests/test_dropbox_pipeline_baseline.py`.
+- Добавлен `userbot_listener.py` на Telethon.
+- Добавлен SQLite-реестр каналов `channel_registry.py`.
+- Добавлены admin-команды:
+  - `/add_channel`
+  - `/del_channel`
+  - `/list_channels`
+- Docker runtime сейчас состоит из двух сервисов:
+  - `tg2book`
+  - `tg2book-userbot`
 
 ## Next Steps
 
-1. Закрыть Phase 0 (подтвердить прохождение baseline-тестов).
-2. Перейти к Phase 1: минимальный internal seam в `bot.py` для повторного использования pipeline.
-3. После этого — Phase 2: SQLite-реестр каналов.
+1. Проверить production bootstrap на VDS уже с `./runtime:/app/runtime`.
+2. Добавить явную документацию по bootstrap Telethon session в Docker.
+3. Закрыть пробел по media-only channel posts.
+4. При необходимости отделить testing dependencies от runtime dependencies.
 
 ## Active Decisions and Considerations
 
-- Основной `python-telegram-bot` pipeline сохраняется без архитектурной замены.
-- Любые userbot-изменения делаются аддитивно, через общий internal processing path.
-- Dropbox-путь считается критическим и должен быть защищён отдельными baseline-тестами.
+- Основной pipeline `текст -> EPUB -> Dropbox -> summary` остаётся общим для bot и userbot.
+- SQLite достаточно для реестра каналов; отдельная БД не нужна.
+- Summary для channel ingestion отправляется админу по `ADMIN_ID`.
+- Runtime state теперь закреплён через bind mount `./runtime:/app/runtime`, что снижает риск потери state при пересоздании контейнеров.

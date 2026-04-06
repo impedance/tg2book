@@ -57,3 +57,7 @@ htmlcov/
 .env
 .venv/
 docker-compose.override.yml
+runtime/*
+!runtime/.gitkeep
+channels.db
+*.session

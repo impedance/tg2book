@@ -3,7 +3,11 @@ services:
   tg2book:
     build: .
     env_file: .env
+    environment:
+      CHANNEL_REGISTRY_DB: ${CHANNEL_REGISTRY_DB:-/app/runtime/channels.db}
     command: ["python", "bot.py"]
+    volumes:
+      - ./runtime:/app/runtime
     restart: unless-stopped
     init: true
     mem_limit: 768m
@@ -13,7 +17,12 @@ services:
   tg2book-userbot:
     build: .
     env_file: .env
+    environment:
+      CHANNEL_REGISTRY_DB: ${CHANNEL_REGISTRY_DB:-/app/runtime/channels.db}
+      USERBOT_SESSION: ${USERBOT_SESSION:-/app/runtime/tg2book_userbot}
     command: ["python", "userbot_listener.py"]
+    volumes:
+      - ./runtime:/app/runtime
     restart: unless-stopped
     init: true
     mem_limit: 768m

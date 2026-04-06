@@ -1,91 +1,168 @@
-# Telegram to EPUB Converter
+# tg2book
 
-A Telegram bot that converts Telegram posts into EPUB format for e-readers.
+`tg2book` это Telegram-бот и sidecar-userbot для доставки постов в PocketBook через Dropbox.
 
-## Features
+Проект сейчас состоит из двух независимых процессов:
 
-- Converts Telegram posts to EPUB format
-- Supports forwarded messages with preserved structure
-- Supports userbot-based channel ingestion (iterative flow)
-- Embeds media (images, videos) directly within the EPUB
-- Maintains clean, readable formatting for text content
-- Properly handles hyperlinks and embedded media
+- `bot.py`:
+  - принимает пересланные сообщения и загруженные `.epub`,
+  - умеет управлять списком каналов через `/add_channel`, `/del_channel`, `/list_channels`,
+  - отправляет пользователю или админу короткий summary-ответ.
+- `userbot_listener.py`:
+  - слушает новые посты каналов через Telethon,
+  - пропускает дальше только каналы из SQLite-реестра,
+  - использует тот же pipeline `текст -> EPUB -> Dropbox`, что и основной бот.
 
-## Prerequisites
+## Что реально работает
 
-- Python 3.x
-- Telegram Bot API token (obtain from @BotFather)
-- Dropbox App credentials (for file storage)
-- Required Python packages (see requirements.txt)
+- Пересланный текст или подпись -> генерация EPUB -> загрузка в Dropbox -> summary в Telegram.
+- Загруженный `.epub` -> обратная отправка файла в Telegram -> синхронизация в Dropbox.
+- Реестр отслеживаемых каналов в `runtime/channels.db`.
+- Админ-команды:
+  - `/add_channel <channel>`
+  - `/del_channel <channel>`
+  - `/list_channels`
+- Userbot ingestion для текстовых постов из каналов.
 
-## Installation
+## Ограничения текущей версии
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/tg2book.git
-cd tg2book
+- Userbot пока обрабатывает только посты, где есть текст.
+- Media-only посты из каналов пропускаются.
+- Dropbox остаётся обязательной частью delivery pipeline.
+- `.env`, `runtime/`, `bot.log`, `userbot.log` являются runtime-артефактами и не должны коммититься.
+
+## Структура проекта
+
+- `bot.py` — основной Telegram-бот на `python-telegram-bot`.
+- `userbot_listener.py` — Telethon-listener для каналов.
+- `channel_registry.py` — SQLite-реестр каналов.
+- `epub_functions.py` — сборка EPUB и обложки.
+- `dropbox_module.py` — refresh токена и загрузка файла в Dropbox.
+- `dropbox-loader.py` — низкоуровневый CLI uploader.
+- `tests/` и `test_bot.py` — unit и baseline-тесты.
+- `memory-bank/` — актуальный контекст, решения и статус проекта.
+- `docs/tasks/` — рабочие плановые документы; это не всегда описание текущего production state.
+
+## Переменные окружения
+
+Обязательные для `bot.py`:
+
+- `TELEGRAM_BOT_TOKEN`
+- `DROPBOX_APP_KEY`
+- `DROPBOX_APP_SECRET`
+- `DROPBOX_REFRESH_TOKEN`
+
+Обязательные для admin/userbot функциональности:
+
+- `ADMIN_ID` — Telegram user id администратора, который получает summary от userbot и может управлять каналами.
+- `API_ID` — Telegram API ID для Telethon.
+- `API_HASH` — Telegram API hash для Telethon.
+
+Опциональные:
+
+- `USERBOT_SESSION` — путь без суффикса `.session` для Telethon, по умолчанию `/app/runtime/tg2book_userbot` в Docker и `tg2book_userbot` в локальном shell-режиме.
+- `CHANNEL_REGISTRY_DB` — путь к SQLite базе, по умолчанию `/app/runtime/channels.db` в Docker и `channels.db` в локальном shell-режиме.
+
+Пример `.env`:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=...
+ADMIN_ID=123456789
+API_ID=...
+API_HASH=...
+USERBOT_SESSION=/app/runtime/tg2book_userbot
+CHANNEL_REGISTRY_DB=/app/runtime/channels.db
+DROPBOX_APP_KEY=...
+DROPBOX_APP_SECRET=...
+DROPBOX_REFRESH_TOKEN=...
 ```
 
-2. Install dependencies:
+## Локальный запуск без Docker
+
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-3. Set up environment variables in `.env` file:
-```bash
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-ADMIN_ID=your_admin_telegram_id
-API_ID=your_telegram_api_id
-API_HASH=your_telegram_api_hash
-USERBOT_SESSION=tg2book_userbot
-DROPBOX_APP_KEY=your_dropbox_app_key
-DROPBOX_APP_SECRET=your_dropbox_app_secret
-DROPBOX_REFRESH_TOKEN=your_dropbox_refresh_token
-```
-
-### Getting Dropbox Credentials
-
-1. Go to https://www.dropbox.com/developers/apps
-2. Create a new app or use existing one
-3. Copy App Key and App Secret to `.env` file
-4. To get refresh token:
-   - Open: `https://www.dropbox.com/oauth2/authorize?client_id=YOUR_APP_KEY&response_type=code&token_access_type=offline`
-   - Authorize the app and copy the authorization code from redirect URL
-   - Run: `python3 exchange_code.py YOUR_AUTHORIZATION_CODE`
-   - The script will automatically update `.env` with the refresh token
-
-## Usage
-For local development with Docker:
-- `make run`: Restart container to apply code changes
-- `make test`: Run tests inside container
-- `make logs`: View logs
-
-1. Start the bot:
-```bash
 ./start.sh
 ```
-or
-```bash
-python3 bot.py
-```
 
-To run userbot listener in parallel:
+Для отдельного userbot-процесса:
+
 ```bash
+source .venv/bin/activate
 ./start_userbot.sh
 ```
 
-2. In Telegram:
-   - Send a link to a Telegram post to the bot
-   - The bot will process the post and return an EPUB file
+Важно: при первом запуске `userbot_listener.py` Telethon попросит интерактивную авторизацию и создаст файл сессии.
 
-## Development
+## Docker
 
-The project uses the following technologies:
-- python-telegram-bot for Telegram bot implementation
-- ebooklib for EPUB generation
-- beautifulsoup4 for HTML parsing
-- requests for content downloading
+В `docker-compose.yml` сейчас два сервиса:
 
-## License
+- `tg2book` -> `python bot.py`
+- `tg2book-userbot` -> `python userbot_listener.py`
 
-MIT License 
+Оба сервиса монтируют `./runtime` с хоста в `/app/runtime` внутри контейнера. Там сохраняются:
+
+- `channels.db`
+- `tg2book_userbot.session`
+
+Основные команды:
+
+```bash
+make build
+make run
+make logs
+make test
+```
+
+Что делают команды:
+
+- `make build` — пересобирает и поднимает оба сервиса.
+- `make run` — поднимает оба сервиса без принудительного rebuild.
+- `make logs` — показывает логи обоих сервисов.
+- `make test` — запускает `pytest` внутри контейнера `tg2book`.
+
+## Проверка после старта
+
+1. `docker compose ps`
+2. `docker compose logs -f --tail=100 tg2book`
+3. `docker compose logs -f --tail=100 tg2book-userbot`
+4. В боте:
+   - отправить `/list_channels`,
+   - добавить тестовый канал,
+   - переслать в бот сообщение с текстом,
+   - проверить, что файл появился в Dropbox.
+
+## Тесты
+
+Локально:
+
+```bash
+source .venv/bin/activate
+pytest
+```
+
+Ключевые наборы:
+
+- `test_bot.py` — unit-level проверки handlers и shared pipeline.
+- `tests/test_channel_registry.py` — SQLite registry.
+- `tests/test_userbot_listener.py` — разбор channel events.
+- `tests/test_dropbox_pipeline_baseline.py` — baseline проверка Dropbox pipeline.
+
+## Получение Dropbox refresh token
+
+1. Создать Dropbox App в https://www.dropbox.com/developers/apps
+2. Открыть ссылку:
+
+```text
+https://www.dropbox.com/oauth2/authorize?client_id=YOUR_APP_KEY&response_type=code&token_access_type=offline
+```
+
+3. После авторизации обменять code:
+
+```bash
+python exchange_code.py YOUR_AUTHORIZATION_CODE
+```
+
+Скрипт ожидает, что `DROPBOX_APP_KEY` и `DROPBOX_APP_SECRET` уже доступны в окружении или `.env`.
