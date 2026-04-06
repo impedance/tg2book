@@ -2,34 +2,27 @@
 
 ## Current Focus
 
-We are currently working on improving code quality for the bot:
+Текущий фокус смещён на итеративный план интеграции userbot:
 
-1. **Core Functionality**: Focus on the main functionality of the bot
-   - Building robust forwarded message handling
-   - Improving EPUB generation
-   - Enhancing user experience
-   
-2. **Future Tasks**:
-   - Add media handling capabilities (images)
-   - Refactor code to improve maintainability
-   - Fix any issues discovered during development
+1. Зафиксировать baseline существующего pipeline:
+   - `сообщение -> EPUB -> Dropbox -> ответ пользователю`.
+2. Добавлять userbot-часть только после усиления тестовой защиты Dropbox-пути.
 
 ## Recent Changes
 
-- Created test_bot.py with unit tests
-- Set up pytest fixtures for simulating different message types
-- Implemented mocking for external dependencies
+- Подготовлен план поэтапной интеграции в `docs/tasks/userbot_iterative_integration_plan.md`.
+- В Phase 0 добавлен аудит текущих тестов: `docs/tasks/phase0_test_audit.md`.
+- Добавлен baseline набор black-box тестов Dropbox pipeline:
+  - `tests/test_dropbox_pipeline_baseline.py`.
 
 ## Next Steps
 
-- Implement Dropbox integration (see memory-bank/dropbox_integration.md)
+1. Закрыть Phase 0 (подтвердить прохождение baseline-тестов).
+2. Перейти к Phase 1: минимальный internal seam в `bot.py` для повторного использования pipeline.
+3. После этого — Phase 2: SQLite-реестр каналов.
 
 ## Active Decisions and Considerations
-- Chose to handle forwarded messages by extracting content and metadata.
-- Using `forward_origin` property to identify and process forwarded messages.
-- Using temporary directories for file operations to ensure cleanup.
 
-## Learnings and Project Insights
-- Different types of forwarded origins require specific handling (user, chat, hidden_user).
-- EPUB generation requires proper HTML content structure.
-- Proper cleanup of temporary files is important for long-running bots.
+- Основной `python-telegram-bot` pipeline сохраняется без архитектурной замены.
+- Любые userbot-изменения делаются аддитивно, через общий internal processing path.
+- Dropbox-путь считается критическим и должен быть защищён отдельными baseline-тестами.

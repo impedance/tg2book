@@ -6,6 +6,7 @@ A Telegram bot that converts Telegram posts into EPUB format for e-readers.
 
 - Converts Telegram posts to EPUB format
 - Supports forwarded messages with preserved structure
+- Supports userbot-based channel ingestion (iterative flow)
 - Embeds media (images, videos) directly within the EPUB
 - Maintains clean, readable formatting for text content
 - Properly handles hyperlinks and embedded media
@@ -33,6 +34,10 @@ pip install -r requirements.txt
 3. Set up environment variables in `.env` file:
 ```bash
 TELEGRAM_BOT_TOKEN=your_bot_token_here
+ADMIN_ID=your_admin_telegram_id
+API_ID=your_telegram_api_id
+API_HASH=your_telegram_api_hash
+USERBOT_SESSION=tg2book_userbot
 DROPBOX_APP_KEY=your_dropbox_app_key
 DROPBOX_APP_SECRET=your_dropbox_app_secret
 DROPBOX_REFRESH_TOKEN=your_dropbox_refresh_token
@@ -62,6 +67,11 @@ For local development with Docker:
 or
 ```bash
 python3 bot.py
+```
+
+To run userbot listener in parallel:
+```bash
+./start_userbot.sh
 ```
 
 2. In Telegram:

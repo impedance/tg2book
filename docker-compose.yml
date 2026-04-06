@@ -3,6 +3,17 @@ services:
   tg2book:
     build: .
     env_file: .env
+    command: ["python", "bot.py"]
+    restart: unless-stopped
+    init: true
+    mem_limit: 768m
+    mem_reservation: 512m
+    cpus: 0.75
+
+  tg2book-userbot:
+    build: .
+    env_file: .env
+    command: ["python", "userbot_listener.py"]
     restart: unless-stopped
     init: true
     mem_limit: 768m

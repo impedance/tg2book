@@ -6,25 +6,28 @@
 *   Core commands (start, help) are functional.
 *   Forwarded message handling is implemented.
 *   EPUB generation from forwarded messages works.
+*   Direct EPUB upload flow is implemented.
+*   Dropbox upload integration is wired in both text and direct EPUB paths.
 *   Basic test suite with pytest is in place.
 
 ## What's Left to Build
 
-*   Enhanced formatting options.
-*   Media content handling (images).
-*   Book metadata customization.
-*   Better error handling with detailed messages.
-- Dropbox integration
+*   Userbot listener for channel ingestion (iterative rollout).
+*   Persistent channel registry (SQLite).
+*   Admin commands for channel management (`/add_channel`, `/del_channel`, `/list_channels`).
+*   Simulated channel-post ingestion seam before real userbot activation.
+*   Enhanced formatting options and media handling improvements (outside first userbot iteration).
 
 ## Current Status
 
-The project has a working implementation with basic functionality. The bot can process forwarded messages and generate EPUB files.
+Проект находится в начале userbot-интеграции по фазам.
+На текущем этапе усиливается тестовая защита существующего Dropbox pipeline (Phase 0).
 
 ## Known Issues
 
-*   No support for media content yet.
-*   Limited formatting options in the generated EPUB.
-*   Empty first page in EPUB output (title page separated from content)
+*   Нет поддержки media-only сценариев в userbot потоке (ещё не реализован).
+*   Ограниченные возможности форматирования EPUB.
+*   Нужна более строгая baseline-проверка Dropbox пути перед архитектурными изменениями.
 
 ## Evolution of Project Decisions
 
@@ -71,3 +74,20 @@ The project has a working implementation with basic functionality. The bot can p
    - CSS normalization
    - Whitespace optimization in generated HTML
 
+## 2026-04-05 - Userbot Iterative Plan Kickoff (Phase 0)
+
+### Implemented
+- Зафиксирован фазовый план интеграции userbot:
+  - `docs/tasks/userbot_iterative_integration_plan.md`
+- Добавлен аудит существующих тестов:
+  - `docs/tasks/phase0_test_audit.md`
+- Добавлен baseline black-box модуль для Dropbox pipeline:
+  - `tests/test_dropbox_pipeline_baseline.py`
+  - Сценарии:
+    - текстовое сообщение -> генерация EPUB -> загрузка в Dropbox;
+    - входной `.epub` -> загрузка точных байтов в Dropbox;
+    - сбой Dropbox -> ошибка наблюдаема в логах, бот остаётся responsive.
+
+### Next Steps
+1. Закрыть верификацию Phase 0 прогонами baseline-тестов.
+2. Перейти к Phase 1: выделение internal processing seam в `bot.py`.
