@@ -2,69 +2,66 @@
 
 ## System Architecture
 
-The system consists of the following components:
+Система состоит из следующих компонентов:
 
-*   **Telegram Bot:** Listens for forwarded messages from users.
-*   **Message Processor:** Extracts content and metadata from forwarded Telegram messages.
-*   **Content Formatter:**  
-  - Formats raw Telegram message data into EPUB-compatible content.
-  - Handles text formatting, links, and basic structure.
-  - Generates appropriate HTML content for the EPUB file.
-*   **EPUB Generator:** Generates the EPUB file from the formatted content.
-*   **File Storage:** Temporarily stores the generated EPUB file.
+- `bot.py`
+  - Telegram Bot API polling process.
+  - Обрабатывает пользовательские сообщения и admin-команды.
+- `userbot_listener.py`
+  - Telethon-based listener для channel posts.
+  - Не делает свою доставку отдельно, а вызывает общий pipeline из `bot.py`.
+- `channel_registry.py`
+  - SQLite-backed storage для monitored channel identifiers.
+- `epub_functions.py`
+  - Генерация EPUB и текстовой cover PNG.
+- `dropbox_module.py`
+  - Refresh Dropbox access token и загрузка файла через `dropbox-loader.py`.
 
 ## Key Technical Decisions
 
-*   Using Python for its ease of use and extensive libraries.
-*   Using `python-telegram-bot` for Telegram bot development.
-*   Using `ebooklib` for EPUB generation.
-*   Using temporary directories for file storage during processing.
+- Не переписывать основной бот, а расширить его через shared internal seam.
+- Использовать sidecar-userbot вместо замены основной bot-архитектуры.
+- Считать Dropbox delivery критическим неизменяемым инвариантом.
+- Хранить monitored channels в SQLite.
+
+## Core Processing Paths
+
+### Path 1. Forwarded/User Message
+
+1. `bot.py` получает сообщение.
+2. `handle_message()` извлекает текст, источник и ссылку.
+3. Вызывается `_process_text_to_dropbox(...)`.
+4. Создаётся EPUB.
+5. EPUB загружается в Dropbox.
+6. Пользователь получает summary reply.
+
+### Path 2. Uploaded EPUB
+
+1. `bot.py` получает документ `.epub`.
+2. Временный файл скачивается из Telegram.
+3. Файл отправляется обратно пользователю.
+4. Те же байты загружаются в Dropbox.
+
+### Path 3. Channel Post via Userbot
+
+1. `userbot_listener.py` принимает `NewMessage`.
+2. `parse_channel_post()` извлекает текст, source identifier и public link.
+3. `process_channel_post()` проверяет, что канал есть в SQLite registry.
+4. Для разрешённого канала вызывается `_process_text_to_dropbox(...)`.
+5. Summary отправляется админу по `ADMIN_ID`.
 
 ## Design Patterns in Use
 
-*   **Facade:** The TelegramToEpub class acts as a facade, hiding the complexity of the EPUB generation from the user.
-*   **Command Pattern:** Each bot command handler is implemented as a separate method.
-
-## Component Relationships
-
-The TelegramToEpub class integrates all components: message processing, content formatting, EPUB generation, and file handling.
-
-## Critical Implementation Paths
-
-1.  User forwards a Telegram message to the bot.
-2.  The bot extracts the sender information from the forwarded message.
-3.  The bot formats the message content into HTML.
-4.  The EPUB generator creates an EPUB file with the content.
-5.  The file is temporarily stored and then sent back to the user.
-6.  Temporary files are cleaned up.
+- Facade-like role: `TelegramToEpub` собирает message processing, EPUB generation и Dropbox upload.
+- Shared internal seam: `_process_text_to_dropbox(...)` используется несколькими entry paths.
+- Sidecar pattern: userbot живёт отдельным процессом рядом с основным ботом.
 
 ## Testing Approach
 
-The testing strategy for this project uses pytest with mocking:
+- Unit tests с моками для Telegram/Dropbox integration points.
+- Black-box baseline tests для Dropbox delivery path.
+- Отдельные тесты для SQLite registry normalization и listener parsing.
 
-```
-test_bot.py
-├── TestTelegramToEpub class
-│   ├── Fixtures for mock objects
-│   │   ├── converter (TelegramToEpub instance)
-│   │   ├── mock_update (Telegram Update)
-│   │   ├── mock_context (Telegram Context)
-│   │   ├── mock_forward_from_user (Update with forwarded user message)
-│   │   └── mock_forward_from_chat (Update with forwarded chat message)
-│   │
-│   ├── Command Tests
-│   │   ├── test_start_command
-│   │   └── test_help_command
-│   │
-│   └── Message Handling Tests
-│       ├── test_create_epub
-│       ├── test_handle_non_forwarded_message
-│       ├── test_handle_forwarded_message_from_user
-│       ├── test_handle_forwarded_message_from_chat
-│       └── test_handle_message_exception
-```
+Критический regression target:
 
-- **Mock Implementation**: External dependencies (ebooklib, telegram) are mocked to avoid requiring them during testing
-- **Async Testing**: Using pytest.mark.asyncio for testing async functions
-- **Test Coverage**: Tests cover all main functionality paths
-- **Error Handling**: Tests explicitly verify error handling behavior
+- не ломать путь `входное сообщение -> EPUB/EPUB bytes -> Dropbox`.

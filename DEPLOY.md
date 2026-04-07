@@ -1,96 +1,170 @@
-# Deployment Guide for tg2book
+# Деплой tg2book на VDS
 
-This guide describes how to deploy the `tg2book` bot to a remote VPS (Virtual Private Server) using Docker.
+Ниже описан актуальный сценарий деплоя для текущего состояния проекта: на сервере запускаются два контейнера, основной бот и userbot-listener.
 
-## Prerequisites
+## Что должно быть на сервере
 
-1.  **VPS**: A server running Linux (Ubuntu/Debian recommended) with SSH access.
-2.  **Docker**: Installed on the VPS.
-    *   Command to check: `docker --version`
-    *   If not installed, follow [official instructions](https://docs.docker.com/engine/install/ubuntu/) or run: `curl -fsSL https://get.docker.com | sh`
-3.  **Git**: Installed on the VPS (`sudo apt update && sudo apt install git`).
-4.  **Bot Tokens**: You will need your `.env` file content.
+- Linux VDS с SSH-доступом.
+- Docker и Docker Compose plugin:
+  - `docker --version`
+  - `docker compose version`
+- Git.
+- Готовый `.env` с Telegram и Dropbox секретами.
 
-## Deployment Methods
+## Что именно разворачивается
 
-### Method 1: Using Git via Manual Setup (Recommended)
+`docker-compose.yml` поднимает:
 
-1.  **SSH into your VPS**:
-    ```bash
-    ssh user@your-vps-ip
-    ```
+- `tg2book` — основной Telegram-бот.
+- `tg2book-userbot` — Telethon userbot, который читает посты каналов.
 
-2.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/impedance/tg2book.git
-    cd tg2book
-    ```
+Оба сервиса собираются из одного `Dockerfile`, но стартуют с разными командами.
+Runtime state хранится через bind mount `./runtime:/app/runtime`.
 
-3.  **Create the environment file**:
-    Create a `.env` file in the project directory:
-    ```bash
-    nano .env
-    ```
-    Paste the content from your local `.env` file (TELEGRAM_BOT_TOKEN, DROPBOX_* keys).
-    Press `Ctrl+X`, then `Y`, then `Enter` to save.
+## Обязательные секреты
 
-4.  **Start the bot**:
-    ```bash
-    docker compose up -d --build
-    ```
+Минимум для полного режима:
 
-## How to Update the Bot (CI/CD Manual Workflow)
+```dotenv
+TELEGRAM_BOT_TOKEN=...
+ADMIN_ID=123456789
+API_ID=...
+API_HASH=...
+USERBOT_SESSION=tg2book_userbot
+CHANNEL_REGISTRY_DB=channels.db
+DROPBOX_APP_KEY=...
+DROPBOX_APP_SECRET=...
+DROPBOX_REFRESH_TOKEN=...
+```
 
-When you make changes to the code (e.g., in `bot.py`):
+Для Docker можно вообще не задавать `USERBOT_SESSION` и `CHANNEL_REGISTRY_DB` в `.env`: compose по умолчанию направит их в `/app/runtime/tg2book_userbot` и `/app/runtime/channels.db`.
 
-1.  **On your Local Machine**:
-    *   Commit and push changes to GitHub:
-        ```bash
-        git add .
-        git commit -m "New features"
-        git push origin main
-        ```
+Если нужен только основной бот без userbot, `API_ID` и `API_HASH` можно не задавать, но тогда сервис `tg2book-userbot` запускать не надо.
 
-2.  **On the VPS**:
-    *   Pull the new code:
-        ```bash
-        cd tg2book
-        git pull
-        ```
-    *   Rebuild and restart the container:
-        ```bash
-        docker compose up -d --build
-        ```
-        *   `--build` ensures the Docker image is recreated with the new code.
-        *   `-d` runs it in the background.
+## Первый деплой по SSH
 
-### Method 2: Manual Copy (SCP)
+1. Подключиться к серверу:
 
-Use this if you don't want to use Git on the server.
+```bash
+ssh user@your-vds
+```
 
-1.  **Run this command from your LOCAL machine**:
-    ```bash
-    # Adjust the path and user@ip accordingly
-    scp -r /home/spec/work/tg2book remote_user@remote_ip:~/tg2book
-    ```
+2. Клонировать проект:
 
-2.  **SSH into VPS and start**:
-    ```bash
-    ssh remote_user@remote_ip
-    cd tg2book
-    nano .env  # Paste secrets here
-    docker compose up -d --build
-    ```
+```bash
+git clone https://github.com/impedance/tg2book.git
+cd tg2book
+```
 
-## Post-Deployment Checks
+3. Создать `.env`:
 
-1.  **Check status**:
-    ```bash
-    docker compose ps
-    ```
-    Should show `tg2book` as `Up`.
+```bash
+nano .env
+```
 
-2.  **Check logs**:
-    ```bash
-    docker compose logs -f --tail=50
-    ```
+4. Собрать и поднять сервисы:
+
+```bash
+docker compose up -d --build
+```
+
+Если это первый запуск userbot и session ещё нет, выполни одноразовую авторизацию:
+
+```bash
+make userbot-login
+```
+
+5. Проверить статус:
+
+```bash
+docker compose ps
+docker compose logs -f --tail=100 tg2book
+docker compose logs -f --tail=100 tg2book-userbot
+```
+
+## Если контейнер уже существует на сервере
+
+Обычное обновление такое:
+
+```bash
+ssh user@your-vds
+cd ~/tg2book
+git pull
+docker compose up -d --build
+docker compose ps
+```
+
+Если менялся только Python-код, без зависимостей, чаще всего достаточно:
+
+```bash
+docker compose up -d
+```
+
+Но безопаснее для ручного релиза использовать `docker compose up -d --build`.
+
+## Важный момент про Telethon session
+
+`userbot_listener.py` использует Telethon session-файл. На практике есть два рабочих варианта:
+
+### Вариант A. Авторизовать userbot прямо на сервере
+
+1. Временно зайти в контейнер или запустить `python userbot_listener.py` локально на сервере.
+2. Пройти интерактивную авторизацию по номеру телефона и коду.
+3. Убедиться, что session-файл сохранился.
+4. После этого обычный `docker compose up -d` сможет переиспользовать сессию.
+
+Практически это делается штатно через:
+
+```bash
+make userbot-login
+```
+
+### Вариант B. Подложить готовый session-файл
+
+Если session уже создан локально, его можно перенести в runtime-директорию проекта:
+
+```bash
+scp tg2book_userbot.session user@your-vds:~/tg2book/runtime/
+```
+
+Текущий compose уже монтирует `~/tg2book/runtime` в контейнер, поэтому `.session` и `channels.db` переживают пересоздание контейнеров.
+
+## Команды для повседневного управления
+
+```bash
+make build
+make run
+make logs
+make test
+make userbot-login
+```
+
+Либо напрямую:
+
+```bash
+docker compose up -d --build
+docker compose logs -f --tail=200
+docker compose restart
+docker compose down
+```
+
+## Что проверить после релиза
+
+1. Бот отвечает на `/start`.
+2. Админ-команда `/list_channels` отрабатывает без ошибки.
+3. Добавление канала через `/add_channel testchannel` сохраняется.
+4. Пересланное в бота текстовое сообщение уходит в Dropbox.
+5. Если включён userbot, новый пост из зарегистрированного канала вызывает summary-сообщение админу.
+
+## Типовые проблемы
+
+- `TELEGRAM_BOT_TOKEN environment variable not set`
+  - Не загружен `.env` или переменная не заполнена.
+- `Не заданы API_ID/API_HASH для userbot`
+  - Поднят `tg2book-userbot`, но в `.env` нет Telethon credentials.
+- `ADMIN_ID должен быть числом`
+  - В `.env` попал username вместо numeric Telegram user id.
+- Ошибки Dropbox `401`, `Invalid token`
+  - Проверить `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN`.
+- Userbot не стартует после rebuild
+  - Обычно отсутствует `runtime/tg2book_userbot.session` или у контейнера нет прав на `runtime/`.

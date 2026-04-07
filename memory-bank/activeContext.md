@@ -2,34 +2,46 @@
 
 ## Current Focus
 
-We are currently working on improving code quality for the bot:
+Текущий фокус проекта уже не в проектировании userbot-интеграции, а в стабилизации и эксплуатации существующей связки:
 
-1. **Core Functionality**: Focus on the main functionality of the bot
-   - Building robust forwarded message handling
-   - Improving EPUB generation
-   - Enhancing user experience
-   
-2. **Future Tasks**:
-   - Add media handling capabilities (images)
-   - Refactor code to improve maintainability
-   - Fix any issues discovered during development
+1. `bot.py` как основной пользовательский вход.
+2. `userbot_listener.py` как channel-ingestion sidecar.
+3. SQLite-реестр `runtime/channels.db` и admin-команды для управления каналами.
+4. Dropbox pipeline как критический delivery path.
+
+## Current Reality
+
+- В проекте уже есть internal processing seam:
+  - `_process_text_to_dropbox(...)`
+- Userbot уже подключён и вызывает:
+  - `TelegramToEpub.process_channel_post(...)`
+- Реестр каналов уже вынесен в:
+  - `channel_registry.py`
+- Есть baseline-тесты критического Dropbox pipeline:
+  - `tests/test_dropbox_pipeline_baseline.py`
 
 ## Recent Changes
 
-- Created test_bot.py with unit tests
-- Set up pytest fixtures for simulating different message types
-- Implemented mocking for external dependencies
+- Добавлен `userbot_listener.py` на Telethon.
+- Добавлен SQLite-реестр каналов `channel_registry.py`.
+- Добавлены admin-команды:
+  - `/add_channel`
+  - `/del_channel`
+  - `/list_channels`
+- Docker runtime сейчас состоит из двух сервисов:
+  - `tg2book`
+  - `tg2book-userbot`
 
 ## Next Steps
 
-- Implement Dropbox integration (see memory-bank/dropbox_integration.md)
+1. Проверить production bootstrap на VDS уже с `./runtime:/app/runtime`.
+2. Добавить явную документацию по bootstrap Telethon session в Docker.
+3. Закрыть пробел по media-only channel posts.
+4. При необходимости отделить testing dependencies от runtime dependencies.
 
 ## Active Decisions and Considerations
-- Chose to handle forwarded messages by extracting content and metadata.
-- Using `forward_origin` property to identify and process forwarded messages.
-- Using temporary directories for file operations to ensure cleanup.
 
-## Learnings and Project Insights
-- Different types of forwarded origins require specific handling (user, chat, hidden_user).
-- EPUB generation requires proper HTML content structure.
-- Proper cleanup of temporary files is important for long-running bots.
+- Основной pipeline `текст -> EPUB -> Dropbox -> summary` остаётся общим для bot и userbot.
+- SQLite достаточно для реестра каналов; отдельная БД не нужна.
+- Summary для channel ingestion отправляется админу по `ADMIN_ID`.
+- Runtime state теперь закреплён через bind mount `./runtime:/app/runtime`, что снижает риск потери state при пересоздании контейнеров.

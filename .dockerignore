@@ -9,3 +9,6 @@ bot.log
 .env
 .env.*
 .git/
+runtime/
+*.session
+channels.db
