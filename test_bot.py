@@ -711,20 +711,42 @@ class TestTelegramToEpub:
 
 # Integration test for main function
 @patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': 'test_token'})
-@patch('bot.Application')
-def test_main_function(mock_application):
+@patch('bot.asyncio.run')
+def test_main_function(mock_asyncio_run):
     """Test main function initialization."""
     from bot import main
+    main()
+    mock_asyncio_run.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': 'test_token'})
+@patch('bot.Application')
+async def test_run_bot_logic(mock_application):
+    """Test run_bot logic including handler registration."""
+    from bot import run_bot
     
-    mock_app_instance = MagicMock()
+    mock_app_instance = AsyncMock()
+    mock_app_instance.__aenter__.return_value = mock_app_instance
+    mock_app_instance.__aexit__.return_value = None
     mock_application.builder.return_value.token.return_value.build.return_value = mock_app_instance
     
-    with patch('bot.CommandHandler', new=MagicMock()), patch('bot.MessageHandler', new=MagicMock()):
-        main()
+    # We want to exit run_bot early to avoid infinite waiting
+    mock_event = AsyncMock()
+    mock_event.wait.return_value = None
+    with patch('bot.asyncio.Event', return_value=mock_event):
+        # Avoid real handlers validating mocked filters
+        with patch('bot.CommandHandler', new=MagicMock()), patch('bot.MessageHandler', new=MagicMock()):
+            # We also need to avoid the userbot listener actually running
+            with patch('userbot_listener.run_userbot_listener', new_callable=AsyncMock):
+                 # We use a timeout or just let it finish if Event.wait is mocked
+                 await run_bot()
     
     # Should create application and add handlers
     mock_app_instance.add_handler.assert_called()
-    mock_app_instance.run_polling.assert_called_once()
+    mock_app_instance.initialize.assert_awaited_once()
+    mock_app_instance.start.assert_awaited_once()
+    mock_app_instance.updater.start_polling.assert_awaited_once()
 
 
 @patch.dict(os.environ, {}, clear=True)

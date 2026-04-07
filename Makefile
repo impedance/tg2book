@@ -5,25 +5,33 @@ USE_DOCKER = 1
 ARTIFACTS_DIR = artifacts
 
 run:
-	docker compose up -d tg2book tg2book-userbot
+	docker compose up -d --remove-orphans tg2book
+
+up: run
 
 test:
 	docker compose exec tg2book pytest
 
 userbot-login:
-	docker compose run --rm --entrypoint python tg2book-userbot userbot_listener.py
+	docker compose run --rm --entrypoint python tg2book userbot_listener.py
 
 logs:
-	docker compose logs -f tg2book tg2book-userbot
+	docker compose logs -f tg2book
 
 logs-bot:
 	docker compose logs -f tg2book
 
 logs-userbot:
-	docker compose logs -f tg2book-userbot
+	docker compose logs -f tg2book
+
+stop:
+	docker compose stop
+
+down:
+	docker compose down
 
 build:
-	docker compose up -d --build tg2book tg2book-userbot
+	docker compose up -d --build --remove-orphans tg2book
 
 prod-build:
 	$(COMPOSE_PROD) build
@@ -56,7 +64,7 @@ lint:
 
 preflight: structural format lint typecheck test
 
-.PHONY: doctor
+.PHONY: run up test stop down build prod-build prod-up prod-logs prod-down typecheck format lint preflight doctor
 
 doctor:
 	@echo "Targets: smoke, agent-smoke, preflight"; \

@@ -171,7 +171,10 @@ def _build_listener_from_env() -> UserbotListener:
     return UserbotListener(converter=TelegramToEpub(), summary_target=summary_target)
 
 
-async def run_userbot_listener():
+async def run_userbot_listener(
+    client: Optional["TelethonClient"] = None,
+    converter: Optional[TelegramToEpub] = None
+):
     """Start Telethon userbot and route channel posts into shared processing seam."""
     api_id_raw = os.getenv("API_ID", "").strip()
     api_hash = os.getenv("API_HASH", "").strip()
@@ -192,8 +195,19 @@ async def run_userbot_listener():
             "Telethon не установлен. Установите зависимости из requirements.txt."
         ) from exc
 
-    listener = _build_listener_from_env()
-    client = TelegramClient(session_name, api_id, api_hash)
+    if converter is None:
+        listener = _build_listener_from_env()
+    else:
+        # If converter supplied externally, build listener with it
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        admin_id_raw = os.getenv("ADMIN_ID", "").strip()
+        if not bot_token or not admin_id_raw:
+             raise RuntimeError("Для summary нужны TELEGRAM_BOT_TOKEN и ADMIN_ID.")
+        summary_target = BotSummaryTarget(bot_token=bot_token, chat_id=int(admin_id_raw))
+        listener = UserbotListener(converter=converter, summary_target=summary_target)
+
+    if client is None:
+        client = TelegramClient(session_name, api_id, api_hash)
 
     @client.on(events.NewMessage())
     async def on_new_message(event):
@@ -203,13 +217,16 @@ async def run_userbot_listener():
             logger.exception("USERBOT_HANDLER_ERROR: %s", exc)
 
     logger.info("USERBOT_START session=%s", session_name)
-    await client.start()
-    logger.info("USERBOT_READY")
-    await client.run_until_disconnected()
+    async with client:
+        logger.info("USERBOT_READY")
+        await client.run_until_disconnected()
 
 
 def main():
-    asyncio.run(run_userbot_listener())
+    try:
+        asyncio.run(run_userbot_listener())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
