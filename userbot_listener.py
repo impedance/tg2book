@@ -57,12 +57,12 @@ class UserbotListener:
         self.converter = converter
         self.summary_target = summary_target
 
-    def parse_channel_post(self, event) -> Optional[IngestedChannelPost]:
+    def parse_channel_post(self, event) -> tuple[Optional[IngestedChannelPost], str]:
         message = getattr(event, "message", event)
         if getattr(event, "is_private", False) or getattr(event, "is_group", False):
-            return None
+            return None, "not_a_channel_post"
         if getattr(event, "is_channel", None) is False:
-            return None
+            return None, "not_a_channel_post"
 
         text = (
             getattr(message, "message", None)
@@ -71,7 +71,7 @@ class UserbotListener:
             or ""
         )
         if not text or not text.strip():
-            return None
+            return None, "empty_or_no_text"
 
         chat = getattr(event, "chat", None) or getattr(message, "chat", None)
         chat_title = getattr(chat, "title", None) or getattr(chat, "username", None) or "Channel"
@@ -89,7 +89,7 @@ class UserbotListener:
         elif chat_id is not None:
             source_identifier = str(chat_id)
         else:
-            return None
+            return None, "unresolved_source_id"
 
         message_id = getattr(message, "id", None)
         if username and message_id is not None:
@@ -97,18 +97,31 @@ class UserbotListener:
         else:
             post_link = ""
 
-        return IngestedChannelPost(
+        post = IngestedChannelPost(
             text_content=text,
             source_name=chat_title,
             source_identifier=source_identifier,
             post_link=post_link,
             message_id=message_id,
         )
+        return post, ""
 
     async def handle_new_message(self, event) -> bool:
-        post = self.parse_channel_post(event)
+        post, skip_reason = self.parse_channel_post(event)
         if not post:
-            logger.info("USERBOT_SKIP reason=empty_or_unresolved_message")
+            # We don't log every single group/private message skip to avoid noise,
+            # but we log empty/unresolved ones if they have a chat/message context.
+            message = getattr(event, "message", event)
+            chat_id = getattr(event, "chat_id", None) or getattr(message, "chat_id", None)
+            message_id = getattr(message, "id", None)
+            
+            if skip_reason != "not_a_channel_post":
+                logger.info(
+                    "USERBOT_SKIP reason=%s chat_id=%s message_id=%s",
+                    skip_reason,
+                    chat_id,
+                    message_id,
+                )
             return False
 
         logger.info(

@@ -395,7 +395,11 @@ class TelegramToEpub:
 
         monitored_channels = set(channel_registry.get_channels(self._channel_db_path()))
         if normalized not in monitored_channels:
-            logger.info("Пропуск channel post: канал не зарегистрирован (%s)", normalized)
+            logger.info(
+                "Пропуск channel post: канал не зарегистрирован (тестируем=%s, отслеживаем=%s)",
+                normalized,
+                list(monitored_channels),
+            )
             return False
 
         async with self.processing_semaphore:
