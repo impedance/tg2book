@@ -395,7 +395,11 @@ class TelegramToEpub:
 
         monitored_channels = set(channel_registry.get_channels(self._channel_db_path()))
         if normalized not in monitored_channels:
-            logger.info("Пропуск channel post: канал не зарегистрирован (%s)", normalized)
+            logger.info(
+                "Пропуск channel post: канал не зарегистрирован (тестируем=%s, отслеживаем=%s)",
+                normalized,
+                list(monitored_channels),
+            )
             return False
 
         async with self.processing_semaphore:
@@ -535,8 +539,10 @@ class TelegramToEpub:
                     logger.error("Не удалось удалить временный EPUB файл.")
     
 
-def main():
-    """Start the bot."""
+async def run_bot():
+    """Start the combined bot and userbot."""
+    from userbot_listener import run_userbot_listener
+
     # Get the token from environment variable
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
@@ -557,8 +563,36 @@ def main():
     application.add_handler(CommandHandler("list_channels", converter.list_channels))
     application.add_handler(MessageHandler(filters.ALL, converter.handle_message))
 
-    # Start the Bot
-    application.run_polling()
+    async with application:
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+        logger.info("Bot API polling started.")
+
+        # Optional Userbot consolidation
+        api_id = os.getenv("API_ID")
+        api_hash = os.getenv("API_HASH")
+        if api_id and api_hash:
+            logger.info("Starting consolidated Userbot listener...")
+            try:
+                await run_userbot_listener(converter=converter)
+            except Exception as e:
+                logger.error("Userbot listener failed: %s. Bot API will continue.", e)
+                # If Userbot fails, we still need to keep the Bot API running
+                # and wait for signals.
+                await asyncio.Event().wait()
+        else:
+            logger.info("Userbot NOT configured (missing API_ID/HASH). Bot API only.")
+            # Use an event to wait for shutdown signals (like Ctrl+C)
+            await asyncio.Event().wait()
+
+
+def main():
+    """Main entry point."""
+    try:
+        asyncio.run(run_bot())
+    except KeyboardInterrupt:
+        logger.info("Bot shutdown by user.")
 
 if __name__ == '__main__':
     main()
