@@ -43,10 +43,16 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             """
             CREATE TABLE IF NOT EXISTS monitored_channels (
                 identifier TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_message_id INTEGER DEFAULT 0
             )
             """
         )
+        # Migration for existing databases
+        try:
+            conn.execute("ALTER TABLE monitored_channels ADD COLUMN last_message_id INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 
@@ -90,3 +96,28 @@ def get_channels(db_path: str = DEFAULT_DB_PATH) -> List[str]:
             "SELECT identifier FROM monitored_channels ORDER BY identifier COLLATE NOCASE ASC"
         ).fetchall()
         return [row[0] for row in rows]
+
+
+def get_channels_with_details(db_path: str = DEFAULT_DB_PATH) -> List[dict]:
+    """Return monitored channels with all details (identifier, last_message_id)."""
+    init_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT identifier, last_message_id FROM monitored_channels ORDER BY identifier COLLATE NOCASE ASC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def update_last_message_id(identifier: str, last_id: int, db_path: str = DEFAULT_DB_PATH) -> None:
+    """Update the last processed message ID for a channel."""
+    init_db(db_path)
+    normalized = _normalize_channel_identifier(identifier)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE monitored_channels SET last_message_id = ? WHERE identifier = ?",
+            (last_id, normalized),
+        )
+        conn.commit()

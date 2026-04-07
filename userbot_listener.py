@@ -3,8 +3,12 @@ import logging
 import os
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from telethon import TelegramClient as TelethonClient
+
+import channel_registry
 from bot import TelegramToEpub
 
 
@@ -107,14 +111,20 @@ class UserbotListener:
         return post, ""
 
     async def handle_new_message(self, event) -> bool:
+        message = getattr(event, "message", event)
+        chat_id = getattr(event, "chat_id", None) or getattr(message, "chat_id", None)
+        message_id = getattr(message, "id", None)
+
+        # DEBUG Trace for ALL events
+        logger.debug(
+            "USERBOT_EVENT_RECEIVE chat_id=%s message_id=%s class=%s",
+            chat_id,
+            message_id,
+            event.__class__.__name__,
+        )
+
         post, skip_reason = self.parse_channel_post(event)
         if not post:
-            # We don't log every single group/private message skip to avoid noise,
-            # but we log empty/unresolved ones if they have a chat/message context.
-            message = getattr(event, "message", event)
-            chat_id = getattr(event, "chat_id", None) or getattr(message, "chat_id", None)
-            message_id = getattr(message, "id", None)
-            
             if skip_reason != "not_a_channel_post":
                 logger.info(
                     "USERBOT_SKIP reason=%s chat_id=%s message_id=%s",
@@ -125,9 +135,10 @@ class UserbotListener:
             return False
 
         logger.info(
-            "USERBOT_RECEIVED source=%s message_id=%s",
+            "HANDOFF_TO_BOT source=%s message_id=%s title=%s",
             post.source_identifier,
             post.message_id,
+            post.source_name,
         )
         success = await self.converter.process_channel_post(
             text_content=post.text_content,
@@ -142,6 +153,12 @@ class UserbotListener:
                 post.source_identifier,
                 post.message_id,
             )
+            # Update last_message_id in registry
+            try:
+                db_path = getattr(self.converter, "_channel_db_path", lambda: channel_registry.DEFAULT_DB_PATH)()
+                channel_registry.update_last_message_id(post.source_identifier, post.message_id, db_path)
+            except Exception as e:
+                logger.error("Failed to update last_message_id: %s", e)
         else:
             logger.info(
                 "USERBOT_FILTERED_OR_FAILED source=%s message_id=%s",
@@ -216,9 +233,62 @@ async def run_userbot_listener(
         except Exception as exc:
             logger.exception("USERBOT_HANDLER_ERROR: %s", exc)
 
+    async def log_dialogs():
+        """Log channel member identities for startup check."""
+        try:
+            from telethon.tl.types import Channel
+            logger.info("USERBOT_CHECK_DIALOGS: Loading monitored channels...")
+            db_path = getattr(listener.converter, "_channel_db_path", lambda: channel_registry.DEFAULT_DB_PATH)()
+            monitored = channel_registry.get_channels(db_path)
+            
+            logger.info("USERBOT_CHECK_DIALOGS: Monitored in registry: %s", monitored)
+            
+            async for dialog in client.iter_dialogs():
+                if isinstance(dialog.entity, Channel):
+                    title = dialog.name
+                    username = getattr(dialog.entity, "username", None)
+                    cid = dialog.id
+                    if username and username.lower() in monitored or str(cid) in monitored:
+                         logger.info("USERBOT_CHECK_DIALOGS: MATCH title='%s' id=%s username=%s", title, cid, username)
+                    else:
+                         logger.debug("USERBOT_CHECK_DIALOGS: OTHER title='%s' id=%s username=%s", title, cid, username)
+        except Exception as e:
+            logger.error("USERBOT_CHECK_DIALOGS_ERROR: %s", e)
+
+    async def periodic_health_check_loop():
+        """Polling loop to recover missed messages from monitored channels."""
+        await asyncio.sleep(60)  # Initial wait
+        while True:
+            try:
+                db_path = getattr(listener.converter, "_channel_db_path", lambda: channel_registry.DEFAULT_DB_PATH)()
+                channels = channel_registry.get_channels_with_details(db_path)
+                logger.info("HEALTH_CHECK_START count=%d", len(channels))
+                
+                for entry in channels:
+                    identifier = entry["identifier"]
+                    last_id = entry["last_message_id"] or 0
+                    
+                    try:
+                        # Fetch up to 5 latest messages to catch gaps
+                        async for message in client.iter_messages(identifier, limit=5):
+                            if message.id > last_id:
+                                logger.info("POLL_RECOVERY_FOUND identifier=%s msg_id=%s", identifier, message.id)
+                                # Simulation of event for handle_new_message
+                                await listener.handle_new_message(message)
+                    except Exception as e:
+                        logger.error("HEALTH_CHECK_CHANNEL_ERROR identifier=%s: %s", identifier, e)
+                
+                logger.info("HEALTH_CHECK_COMPLETED")
+            except Exception as e:
+                logger.exception("HEALTH_CHECK_LOOP_ERROR: %s", e)
+            
+            await asyncio.sleep(600)  # 10 minutes
+
     logger.info("USERBOT_START session=%s", session_name)
     async with client:
         logger.info("USERBOT_READY")
+        await log_dialogs()
+        asyncio.create_task(periodic_health_check_loop())
         await client.run_until_disconnected()
 
 
