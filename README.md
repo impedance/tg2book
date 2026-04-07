@@ -170,3 +170,11 @@ python exchange_code.py YOUR_AUTHORIZATION_CODE
 ```
 
 Скрипт ожидает, что `DROPBOX_APP_KEY` и `DROPBOX_APP_SECRET` уже доступны в окружении или `.env`.
+
+## CI/CD
+
+Проект настроен на автоматический деплой через GitHub Actions:
+- **Ветка**: `master`
+- **Триггер**: push в ветку `master`
+- **Процесс**: SSH-подключение к VDS, `git pull`, `docker compose up -d --build`.
+- **Секреты**: `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `SSH_KEY` настроены в репозитории через `gh`.
