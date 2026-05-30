@@ -801,10 +801,11 @@ async def test_reauth_start_non_admin_rejected():
 
 
 @pytest.mark.asyncio
-@patch.dict(os.environ, {"ADMIN_ID": "98161553", "API_ID": "123", "API_HASH": "abc", "USERBOT_SESSION": "test_session"})
+@patch.dict(os.environ, {"ADMIN_ID": "98161553", "API_ID": "123", "API_HASH": "abc", "USERBOT_SESSION": "test_session", "USERBOT_PHONE": "79296212402"})
 async def test_reauth_start_ok():
-    from bot import reauth_start, REAUTH_PHONE
+    from bot import reauth_start, REAUTH_CODE
     mock_client = AsyncMock()
+    mock_client.send_code_request = AsyncMock()
     mock_telethon = MagicMock()
     mock_telethon.TelegramClient.return_value = mock_client
 
@@ -814,10 +815,12 @@ async def test_reauth_start_ok():
     with patch.dict(sys.modules, {"telethon": mock_telethon}):
         result = await reauth_start(update, ctx)
 
-    assert result == REAUTH_PHONE
+    assert result == REAUTH_CODE
     assert "reauth_client" in ctx.bot_data
+    assert ctx.user_data["reauth_phone"] == "+79296212402"
+    mock_client.send_code_request.assert_awaited_once_with("+79296212402")
     update.message.reply_text.assert_awaited_once()
-    assert "телефон" in update.message.reply_text.call_args.args[0].lower()
+    assert "код" in update.message.reply_text.call_args.args[0].lower()
 
 
 @pytest.mark.asyncio

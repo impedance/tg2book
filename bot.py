@@ -581,22 +581,30 @@ async def reauth_start(update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("❌ Не заданы API_ID/API_HASH. Проверьте .env")
         return ConversationHandler.END
 
+    phone = os.getenv("USERBOT_PHONE", "79296212402").strip()
+    if not phone.startswith("+"):
+        phone = "+" + phone
+
     try:
         from telethon import TelegramClient
         api_id = int(api_id_raw)
         client = TelegramClient(session_name, api_id, api_hash)
         await client.connect()
+        await client.send_code_request(phone)
         context.bot_data["reauth_client"] = client
+        context.user_data["reauth_phone"] = phone
     except Exception as e:
-        logger.error("reauth_start: не удалось создать Telethon клиент: %s", e)
-        await message.reply_text(f"❌ Ошибка инициализации клиента: {e}")
+        logger.error("reauth_start: ошибка инициализации: %s", e)
+        await message.reply_text(f"❌ Ошибка: {e}")
         return ConversationHandler.END
 
-    await message.reply_text("📱 Введите номер телефона (например, +79991234567):")
-    return REAUTH_PHONE
+    await message.reply_text(f"🔑 Код отправлен на {phone}. Введите его:")
+    return REAUTH_CODE
 
 
 async def reauth_phone(update, context: ContextTypes.DEFAULT_TYPE):
+    # Этот шаг больше не используется (телефон берётся из USERBOT_PHONE),
+    # но оставлен для совместимости с ConversationHandler состоянием.
     message = update.message
     phone = (message.text or "").strip()
     client = context.bot_data.get("reauth_client")
@@ -608,7 +616,7 @@ async def reauth_phone(update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await client.send_code_request(phone)
         context.user_data["reauth_phone"] = phone
-        await message.reply_text("🔑 Введите код из Telegram (цифры через пробел не нужны, просто цифры):")
+        await message.reply_text("🔑 Введите код из Telegram:")
         return REAUTH_CODE
     except Exception as e:
         logger.error("reauth_phone error: %s", e)
