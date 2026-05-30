@@ -585,13 +585,25 @@ async def reauth_start(update, context: ContextTypes.DEFAULT_TYPE):
     if not phone.startswith("+"):
         phone = "+" + phone
 
+    # Используем временную сессию чтобы не конфликтовать с протухшей
+    tmp_session = session_name + "_reauth_tmp"
+
     try:
         from telethon import TelegramClient
         api_id = int(api_id_raw)
-        client = TelegramClient(session_name, api_id, api_hash)
+        # Удаляем старый tmp если остался с прошлой попытки
+        for ext in ("", ".session"):
+            p = tmp_session + ext if not ext else tmp_session + ext
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+        client = TelegramClient(tmp_session, api_id, api_hash)
         await client.connect()
         await client.send_code_request(phone)
         context.bot_data["reauth_client"] = client
+        context.bot_data["reauth_session_name"] = session_name
+        context.bot_data["reauth_tmp_session"] = tmp_session
         context.user_data["reauth_phone"] = phone
     except Exception as e:
         logger.error("reauth_start: ошибка инициализации: %s", e)
@@ -638,6 +650,7 @@ async def reauth_code(update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await client.sign_in(phone, code)
         await client.disconnect()
+        _replace_session(context)
         context.bot_data.pop("reauth_client", None)
         context.user_data.pop("reauth_phone", None)
         restart_event = context.bot_data.get("restart_event")
@@ -647,7 +660,6 @@ async def reauth_code(update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("REAUTH_SUCCESS — userbot restart triggered")
         return ConversationHandler.END
     except Exception as e:
-        # Проверяем по имени класса чтобы не зависеть от импорта в тесте
         if type(e).__name__ == "SessionPasswordNeededError":
             await message.reply_text("🔐 Введите пароль двухфакторной аутентификации:")
             return REAUTH_2FA
@@ -669,6 +681,7 @@ async def reauth_2fa(update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await client.sign_in(password=password)
         await client.disconnect()
+        _replace_session(context)
         context.bot_data.pop("reauth_client", None)
         context.user_data.pop("reauth_phone", None)
         restart_event = context.bot_data.get("restart_event")
@@ -689,6 +702,22 @@ async def reauth_cancel(update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text("Реавторизация отменена.")
     return ConversationHandler.END
+
+
+def _replace_session(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Перезаписывает основной session-файл временным после успешного reauth."""
+    tmp = context.bot_data.pop("reauth_tmp_session", None)
+    target = context.bot_data.pop("reauth_session_name", None)
+    if not tmp or not target:
+        return
+    tmp_file = tmp + ".session"
+    target_file = target + ".session"
+    try:
+        if os.path.exists(tmp_file):
+            os.replace(tmp_file, target_file)
+            logger.info("REAUTH session replaced: %s -> %s", tmp_file, target_file)
+    except Exception as e:
+        logger.error("REAUTH session replace failed: %s", e)
 
 
 async def _cleanup_reauth_client(context: ContextTypes.DEFAULT_TYPE) -> None:
