@@ -13,9 +13,11 @@ class MockModule:
 telegram_mock = MockModule()
 telegram_mock.Update = MagicMock
 
-telegram_ext_mock = MockModule() 
+telegram_ext_mock = MockModule()
 telegram_ext_mock.Application = MagicMock
 telegram_ext_mock.CommandHandler = MagicMock
+telegram_ext_mock.ConversationHandler = MagicMock
+telegram_ext_mock.ConversationHandler.END = -1
 telegram_ext_mock.MessageHandler = MagicMock
 telegram_ext_mock.ContextTypes = MagicMock
 telegram_ext_mock.ContextTypes.DEFAULT_TYPE = MagicMock
@@ -753,7 +755,210 @@ async def test_run_bot_logic(mock_application):
 def test_main_function_no_token():
     """Test main function without token."""
     from bot import main
-    
+
     # Should return early without token
     result = main()
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Reauth conversation handler tests
+# ---------------------------------------------------------------------------
+
+def _make_message(user_id=98161553, text=""):
+    msg = AsyncMock()
+    msg.from_user = MagicMock()
+    msg.from_user.id = user_id
+    msg.text = text
+    msg.reply_text = AsyncMock()
+    return msg
+
+
+def _make_update(user_id=98161553, text=""):
+    update = MagicMock()
+    update.message = _make_message(user_id=user_id, text=text)
+    return update
+
+
+def _make_context(bot_data=None, user_data=None):
+    ctx = MagicMock()
+    ctx.bot_data = bot_data if bot_data is not None else {}
+    ctx.user_data = user_data if user_data is not None else {}
+    return ctx
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553", "API_ID": "123", "API_HASH": "abc", "USERBOT_SESSION": "test_session"})
+async def test_reauth_start_non_admin_rejected():
+    from bot import reauth_start, REAUTH_PHONE
+    update = _make_update(user_id=99999)
+    ctx = _make_context()
+    result = await reauth_start(update, ctx)
+    assert result == -1  # ConversationHandler.END
+    update.message.reply_text.assert_awaited_once()
+    assert "администратор" in update.message.reply_text.call_args.args[0].lower() or \
+           "администратор" in update.message.reply_text.call_args.args[0]
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553", "API_ID": "123", "API_HASH": "abc", "USERBOT_SESSION": "test_session"})
+async def test_reauth_start_ok():
+    from bot import reauth_start, REAUTH_PHONE
+    mock_client = AsyncMock()
+    mock_telethon = MagicMock()
+    mock_telethon.TelegramClient.return_value = mock_client
+
+    update = _make_update(user_id=98161553)
+    ctx = _make_context()
+
+    with patch.dict(sys.modules, {"telethon": mock_telethon}):
+        result = await reauth_start(update, ctx)
+
+    assert result == REAUTH_PHONE
+    assert "reauth_client" in ctx.bot_data
+    update.message.reply_text.assert_awaited_once()
+    assert "телефон" in update.message.reply_text.call_args.args[0].lower()
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553"})
+async def test_reauth_phone_sends_code():
+    from bot import reauth_phone, REAUTH_CODE
+    mock_client = AsyncMock()
+    mock_client.send_code_request = AsyncMock()
+
+    update = _make_update(user_id=98161553, text="+79991234567")
+    ctx = _make_context(bot_data={"reauth_client": mock_client})
+
+    result = await reauth_phone(update, ctx)
+
+    assert result == REAUTH_CODE
+    mock_client.send_code_request.assert_awaited_once_with("+79991234567")
+    assert ctx.user_data["reauth_phone"] == "+79991234567"
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553"})
+async def test_reauth_code_happy_path():
+    from bot import reauth_code
+    mock_client = AsyncMock()
+    mock_client.sign_in = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+
+    restart_event = MagicMock()
+    update = _make_update(user_id=98161553, text="12345")
+    ctx = _make_context(
+        bot_data={"reauth_client": mock_client, "restart_event": restart_event},
+        user_data={"reauth_phone": "+79991234567"},
+    )
+
+    result = await reauth_code(update, ctx)
+
+    assert result == -1  # ConversationHandler.END
+    mock_client.sign_in.assert_awaited_once_with("+79991234567", "12345")
+    mock_client.disconnect.assert_awaited_once()
+    restart_event.set.assert_called_once()
+    assert "reauth_client" not in ctx.bot_data
+    assert "✅" in update.message.reply_text.call_args.args[0]
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553"})
+async def test_reauth_code_triggers_2fa():
+    from bot import reauth_code, REAUTH_2FA
+
+    class FakeSessionPasswordNeededError(Exception):
+        pass
+    FakeSessionPasswordNeededError.__name__ = "SessionPasswordNeededError"
+
+    mock_client = AsyncMock()
+    mock_client.sign_in = AsyncMock(side_effect=FakeSessionPasswordNeededError())
+
+    update = _make_update(user_id=98161553, text="12345")
+    ctx = _make_context(
+        bot_data={"reauth_client": mock_client},
+        user_data={"reauth_phone": "+79991234567"},
+    )
+
+    result = await reauth_code(update, ctx)
+
+    assert result == REAUTH_2FA
+    assert "2FA" in update.message.reply_text.call_args.args[0] or \
+           "пароль" in update.message.reply_text.call_args.args[0].lower()
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553"})
+async def test_reauth_2fa_happy_path():
+    from bot import reauth_2fa
+    mock_client = AsyncMock()
+    mock_client.sign_in = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+
+    restart_event = MagicMock()
+    update = _make_update(user_id=98161553, text="mypassword")
+    ctx = _make_context(
+        bot_data={"reauth_client": mock_client, "restart_event": restart_event},
+        user_data={"reauth_phone": "+79991234567"},
+    )
+
+    result = await reauth_2fa(update, ctx)
+
+    assert result == -1  # ConversationHandler.END
+    mock_client.sign_in.assert_awaited_once_with(password="mypassword")
+    restart_event.set.assert_called_once()
+    assert "✅" in update.message.reply_text.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_reauth_cancel_cleans_up():
+    from bot import reauth_cancel
+    mock_client = AsyncMock()
+
+    update = _make_update()
+    ctx = _make_context(bot_data={"reauth_client": mock_client})
+
+    result = await reauth_cancel(update, ctx)
+
+    assert result == -1  # ConversationHandler.END
+    mock_client.disconnect.assert_awaited_once()
+    assert "reauth_client" not in ctx.bot_data
+
+
+# ---------------------------------------------------------------------------
+# Retry-loop unit tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553", "API_ID": "123", "API_HASH": "abc", "TELEGRAM_BOT_TOKEN": "tok"})
+async def test_notify_admin_sends_message():
+    from bot import _notify_admin
+    mock_app = MagicMock()
+    mock_app.bot.send_message = AsyncMock()
+
+    await _notify_admin(mock_app, 98161553, "test message")
+
+    mock_app.bot.send_message.assert_awaited_once_with(chat_id=98161553, text="test message")
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553", "API_ID": "123", "API_HASH": "abc", "TELEGRAM_BOT_TOKEN": "tok"})
+async def test_notify_admin_skips_on_none():
+    from bot import _notify_admin
+    mock_app = MagicMock()
+    mock_app.bot.send_message = AsyncMock()
+
+    await _notify_admin(mock_app, None, "test message")
+
+    mock_app.bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553", "API_ID": "123", "API_HASH": "abc", "TELEGRAM_BOT_TOKEN": "tok"})
+async def test_notify_admin_tolerates_send_error():
+    from bot import _notify_admin
+    mock_app = MagicMock()
+    mock_app.bot.send_message = AsyncMock(side_effect=Exception("network error"))
+
+    # Should not raise
+    await _notify_admin(mock_app, 98161553, "test message")

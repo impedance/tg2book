@@ -10,7 +10,12 @@ import channel_registry
 import dropbox_module
 from epub_functions import create_epub
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ConversationHandler, ContextTypes, MessageHandler, filters
+
+REAUTH_PHONE = 1
+REAUTH_CODE = 2
+REAUTH_2FA = 3
+
 
 class HTTPRequestFilter(logging.Filter):
     def filter(self, record):
@@ -540,6 +545,154 @@ class TelegramToEpub:
                     logger.error("Не удалось удалить временный EPUB файл.")
     
 
+async def _notify_admin(application, admin_id: int | None, text: str) -> None:
+    if admin_id is None:
+        return
+    try:
+        await application.bot.send_message(chat_id=admin_id, text=text)
+    except Exception as e:
+        logger.error("Не удалось уведомить админа: %s", e)
+
+
+def _get_admin_id_from_env() -> int | None:
+    raw = os.getenv("ADMIN_ID", "").strip()
+    try:
+        return int(raw) if raw else None
+    except ValueError:
+        return None
+
+
+async def reauth_start(update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    if not message:
+        return ConversationHandler.END
+
+    admin_id = _get_admin_id_from_env()
+    user_id = getattr(getattr(message, "from_user", None), "id", None)
+    if admin_id is None or user_id != admin_id:
+        await message.reply_text("❌ Команда доступна только администратору.")
+        return ConversationHandler.END
+
+    api_id_raw = os.getenv("API_ID", "").strip()
+    api_hash = os.getenv("API_HASH", "").strip()
+    session_name = os.getenv("USERBOT_SESSION", "tg2book_userbot").strip()
+
+    if not api_id_raw or not api_hash:
+        await message.reply_text("❌ Не заданы API_ID/API_HASH. Проверьте .env")
+        return ConversationHandler.END
+
+    try:
+        from telethon import TelegramClient
+        api_id = int(api_id_raw)
+        client = TelegramClient(session_name, api_id, api_hash)
+        await client.connect()
+        context.bot_data["reauth_client"] = client
+    except Exception as e:
+        logger.error("reauth_start: не удалось создать Telethon клиент: %s", e)
+        await message.reply_text(f"❌ Ошибка инициализации клиента: {e}")
+        return ConversationHandler.END
+
+    await message.reply_text("📱 Введите номер телефона (например, +79991234567):")
+    return REAUTH_PHONE
+
+
+async def reauth_phone(update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    phone = (message.text or "").strip()
+    client = context.bot_data.get("reauth_client")
+
+    if not client:
+        await message.reply_text("❌ Сессия реавторизации не найдена. Начните заново: /reauth")
+        return ConversationHandler.END
+
+    try:
+        await client.send_code_request(phone)
+        context.user_data["reauth_phone"] = phone
+        await message.reply_text("🔑 Введите код из Telegram (цифры через пробел не нужны, просто цифры):")
+        return REAUTH_CODE
+    except Exception as e:
+        logger.error("reauth_phone error: %s", e)
+        await message.reply_text(f"❌ Ошибка отправки кода: {e}\nНачните заново: /reauth")
+        await _cleanup_reauth_client(context)
+        return ConversationHandler.END
+
+
+async def reauth_code(update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    code = (message.text or "").strip()
+    phone = context.user_data.get("reauth_phone", "")
+    client = context.bot_data.get("reauth_client")
+
+    if not client:
+        await message.reply_text("❌ Сессия реавторизации не найдена. Начните заново: /reauth")
+        return ConversationHandler.END
+
+    try:
+        await client.sign_in(phone, code)
+        await client.disconnect()
+        context.bot_data.pop("reauth_client", None)
+        context.user_data.pop("reauth_phone", None)
+        restart_event = context.bot_data.get("restart_event")
+        if restart_event:
+            restart_event.set()
+        await message.reply_text("✅ Переавторизация успешна! Userbot перезапускается...")
+        logger.info("REAUTH_SUCCESS — userbot restart triggered")
+        return ConversationHandler.END
+    except Exception as e:
+        # Проверяем по имени класса чтобы не зависеть от импорта в тесте
+        if type(e).__name__ == "SessionPasswordNeededError":
+            await message.reply_text("🔐 Введите пароль двухфакторной аутентификации:")
+            return REAUTH_2FA
+        logger.error("reauth_code error: %s", e)
+        await message.reply_text(f"❌ Ошибка входа: {e}\nНачните заново: /reauth")
+        await _cleanup_reauth_client(context)
+        return ConversationHandler.END
+
+
+async def reauth_2fa(update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    password = (message.text or "").strip()
+    client = context.bot_data.get("reauth_client")
+
+    if not client:
+        await message.reply_text("❌ Сессия реавторизации не найдена. Начните заново: /reauth")
+        return ConversationHandler.END
+
+    try:
+        await client.sign_in(password=password)
+        await client.disconnect()
+        context.bot_data.pop("reauth_client", None)
+        context.user_data.pop("reauth_phone", None)
+        restart_event = context.bot_data.get("restart_event")
+        if restart_event:
+            restart_event.set()
+        await message.reply_text("✅ Переавторизация успешна! Userbot перезапускается...")
+        logger.info("REAUTH_SUCCESS_2FA — userbot restart triggered")
+        return ConversationHandler.END
+    except Exception as e:
+        logger.error("reauth_2fa error: %s", e)
+        await message.reply_text(f"❌ Ошибка 2FA: {e}\nНачните заново: /reauth")
+        await _cleanup_reauth_client(context)
+        return ConversationHandler.END
+
+
+async def reauth_cancel(update, context: ContextTypes.DEFAULT_TYPE):
+    await _cleanup_reauth_client(context)
+    if update.message:
+        await update.message.reply_text("Реавторизация отменена.")
+    return ConversationHandler.END
+
+
+async def _cleanup_reauth_client(context: ContextTypes.DEFAULT_TYPE) -> None:
+    client = context.bot_data.pop("reauth_client", None)
+    context.user_data.pop("reauth_phone", None)
+    if client:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def run_bot():
     """Start the combined bot and userbot."""
     from userbot_listener import run_userbot_listener
@@ -562,6 +715,15 @@ async def run_bot():
     application.add_handler(CommandHandler("add_channel", converter.add_channel))
     application.add_handler(CommandHandler("del_channel", converter.del_channel))
     application.add_handler(CommandHandler("list_channels", converter.list_channels))
+    application.add_handler(ConversationHandler(
+        entry_points=[CommandHandler("reauth", reauth_start)],
+        states={
+            REAUTH_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reauth_phone)],
+            REAUTH_CODE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, reauth_code)],
+            REAUTH_2FA:   [MessageHandler(filters.TEXT & ~filters.COMMAND, reauth_2fa)],
+        },
+        fallbacks=[CommandHandler("cancel", reauth_cancel)],
+    ))
     application.add_handler(MessageHandler(filters.ALL, converter.handle_message))
 
     async with application:
@@ -574,17 +736,38 @@ async def run_bot():
         api_id = os.getenv("API_ID")
         api_hash = os.getenv("API_HASH")
         if api_id and api_hash:
-            logger.info("Starting consolidated Userbot listener...")
-            try:
-                await run_userbot_listener(converter=converter)
-            except Exception as e:
-                logger.error("Userbot listener failed: %s. Bot API will continue.", e)
-                # If Userbot fails, we still need to keep the Bot API running
-                # and wait for signals.
-                await asyncio.Event().wait()
+            admin_id = _get_admin_id_from_env()
+            restart_event = asyncio.Event()
+            application.bot_data["restart_event"] = restart_event
+
+            retry_delay = 30
+            max_delay = 1800
+            while True:
+                restart_event.clear()
+                logger.info("Starting consolidated Userbot listener...")
+                try:
+                    await run_userbot_listener(converter=converter)
+                    logger.warning("Userbot disconnected cleanly, restarting in %ds...", retry_delay)
+                    retry_delay = 30
+                except EOFError:
+                    logger.error("Userbot needs re-authorization (EOF). Notifying admin.")
+                    await _notify_admin(
+                        application, admin_id,
+                        "⚠️ Userbot: сессия протухла.\nИспользуй /reauth для переавторизации без SSH."
+                    )
+                    retry_delay = max_delay
+                except Exception as e:
+                    logger.error("Userbot listener failed: %s. Retry in %ds.", e, retry_delay)
+                    retry_delay = min(retry_delay * 2, max_delay)
+
+                try:
+                    await asyncio.wait_for(restart_event.wait(), timeout=retry_delay)
+                    logger.info("Userbot restart triggered manually, restarting now.")
+                    retry_delay = 30
+                except asyncio.TimeoutError:
+                    pass
         else:
             logger.info("Userbot NOT configured (missing API_ID/HASH). Bot API only.")
-            # Use an event to wait for shutdown signals (like Ctrl+C)
             await asyncio.Event().wait()
 
 
