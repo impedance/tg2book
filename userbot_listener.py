@@ -285,11 +285,18 @@ async def run_userbot_listener(
             await asyncio.sleep(600)  # 10 minutes
 
     logger.info("USERBOT_START session=%s", session_name)
-    async with client:
+    await client.connect()
+    try:
+        if not await client.is_user_authorized():
+            # Не вызываем start() чтобы не триггернуть send_code_request
+            # (это инвалидирует код отправленный через /reauth)
+            raise EOFError("Userbot session is not authorized")
         logger.info("USERBOT_READY")
         await log_dialogs()
         asyncio.create_task(periodic_health_check_loop())
         await client.run_until_disconnected()
+    finally:
+        await client.disconnect()
 
 
 def main():
