@@ -13,7 +13,7 @@ test:
 	docker compose exec tg2book pytest
 
 userbot-login:
-	docker compose run --rm --entrypoint python tg2book userbot_listener.py
+	docker compose run --rm --entrypoint python tg2book login_userbot.py
 
 logs:
 	docker compose logs -f tg2book
