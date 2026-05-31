@@ -610,7 +610,15 @@ async def reauth_start(update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text(f"❌ Ошибка: {e}")
         return ConversationHandler.END
 
-    await message.reply_text(f"🔑 Код отправлен на {phone}. Введите его:")
+    await message.reply_text(
+        f"🔑 Код отправлен на {phone}.\n\n"
+        "⚠️ ВАЖНО: введите код *с пробелами или дефисами между цифрами*, "
+        "например `1 2 3 4 5` или `1-2-3-4-5`.\n\n"
+        "Если ввести код слитно, Telegram распознает его как логин-код "
+        "в сообщении и мгновенно аннулирует (ошибка «code expired»). "
+        "Разделители это предотвращают.",
+        parse_mode="Markdown",
+    )
     return REAUTH_CODE
 
 
@@ -639,13 +647,19 @@ async def reauth_phone(update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reauth_code(update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    code = (message.text or "").strip()
+    # Telegram аннулирует логин-код, если он проходит через сообщение слитно.
+    # Просим вводить с разделителями и выкидываем всё кроме цифр.
+    code = re.sub(r"\D", "", message.text or "")
     phone = context.user_data.get("reauth_phone", "")
     client = context.bot_data.get("reauth_client")
 
     if not client:
         await message.reply_text("❌ Сессия реавторизации не найдена. Начните заново: /reauth")
         return ConversationHandler.END
+
+    if not code:
+        await message.reply_text("❌ В сообщении нет цифр. Введите код, например `1 2 3 4 5`.")
+        return REAUTH_CODE
 
     try:
         await client.sign_in(phone, code)

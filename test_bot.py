@@ -867,6 +867,46 @@ async def test_reauth_code_happy_path():
 
 @pytest.mark.asyncio
 @patch.dict(os.environ, {"ADMIN_ID": "98161553"})
+async def test_reauth_code_strips_separators():
+    """Код с разделителями (1-2-3-4-5) должен парситься в чистые цифры,
+    т.к. слитный код Telegram аннулирует как логин-код в сообщении."""
+    from bot import reauth_code
+    mock_client = AsyncMock()
+    mock_client.sign_in = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+
+    update = _make_update(user_id=98161553, text="1 2-3.4 5")
+    ctx = _make_context(
+        bot_data={"reauth_client": mock_client, "restart_event": MagicMock()},
+        user_data={"reauth_phone": "+79991234567"},
+    )
+
+    await reauth_code(update, ctx)
+
+    mock_client.sign_in.assert_awaited_once_with("+79991234567", "12345")
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553"})
+async def test_reauth_code_no_digits_reprompts():
+    from bot import reauth_code, REAUTH_CODE
+    mock_client = AsyncMock()
+    mock_client.sign_in = AsyncMock()
+
+    update = _make_update(user_id=98161553, text="нет кода")
+    ctx = _make_context(
+        bot_data={"reauth_client": mock_client},
+        user_data={"reauth_phone": "+79991234567"},
+    )
+
+    result = await reauth_code(update, ctx)
+
+    assert result == REAUTH_CODE
+    mock_client.sign_in.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch.dict(os.environ, {"ADMIN_ID": "98161553"})
 async def test_reauth_code_triggers_2fa():
     from bot import reauth_code, REAUTH_2FA
 
