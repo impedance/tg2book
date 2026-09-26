@@ -137,22 +137,43 @@ def adapt_content_for_eink(content):
       (no arbitrary URL fetching in V1); local images stay, CSS constrains them.
     Falls back to the original content if parsing fails.
     """
-    if not content or "<table" not in content and "<img" not in content:
+    if not content or ("<table" not in content and "<img" not in content
+                       and "<pre" not in content):
         return content
     try:
         from bs4 import BeautifulSoup
     except ImportError:
         return content
+    # Device-verified (PB970, 26.09.2026): the reader ignores CSS
+    # borders/backgrounds, so structural framing uses HTML attributes.
     try:
         soup = BeautifulSoup(f"<div>{content}</div>", "lxml")
         for img in soup.find_all("img"):
             src = (img.get("src") or "").strip()
             if src.startswith("http://") or src.startswith("https://"):
                 img.replace_with(f"[image: {src}]")
+        for pre in soup.find_all("pre"):
+            # Code panel as a bordered single-cell table: CSS background
+            # on <pre> is ignored by the reader, the table frame survives.
+            frame = soup.new_tag("table", border="1", cellpadding="6",
+                                 cellspacing="0", width="100%")
+            row = soup.new_tag("tr")
+            cell = soup.new_tag("td")
+            pre.replace_with(frame)
+            frame.append(row)
+            row.append(cell)
+            cell.append(pre.extract())
         for table in soup.find_all("table"):
+            if table.get("border") is not None:
+                continue  # code panel frame, already attribute-styled
             rows = table.find_all("tr")
             ncols = max((len(r.find_all(["th", "td"])) for r in rows), default=0)
             if ncols <= MAX_TABLE_COLS or not rows:
+                # Attribute borders: CSS th/td borders are ignored on device.
+                table["border"] = "1"
+                table["cellpadding"] = "4"
+                table["cellspacing"] = "0"
+                table["width"] = "100%"
                 continue
             header = [c.get_text(strip=True) for c in rows[0].find_all(["th", "td"])]
             replacement = []
@@ -216,7 +237,9 @@ def create_epub(title, author, content, output_path, source_url=None):
     # Add content to the book
     book.add_item(main_content)
 
-    # TOC + navigation (Nav is part of the spine, so the TOC actually opens on device).
+    # TOC data (NCX + Nav package items + toc). Device-verified: Nav must
+    # NOT be in the spine — on PB970 it renders as an empty first page
+    # with a single link. NCX alone drives the reader TOC.
     nav = epub.EpubNav()
     book.add_item(nav)
     book.add_item(epub.EpubNcx())
@@ -225,7 +248,7 @@ def create_epub(title, author, content, output_path, source_url=None):
     # Add CSS file
     book.add_item(nav_css)
 
-    book.spine = ['nav', main_content]
+    book.spine = [main_content]
 
     # Write to the file
     epub.write_epub(output_path, book, {})
