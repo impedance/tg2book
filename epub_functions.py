@@ -154,11 +154,12 @@ def adapt_content_for_eink(content):
                 img.replace_with(f"[image: {src}]")
         for pre in soup.find_all("pre"):
             # Code panel as a bordered single-cell table: CSS background
-            # on <pre> is ignored by the reader, the table frame survives.
+            # on <pre> is ignored by the reader, so the gray fill goes in
+            # the legacy bgcolor attribute (pending device check).
             frame = soup.new_tag("table", border="1", cellpadding="6",
                                  cellspacing="0", width="100%")
             row = soup.new_tag("tr")
-            cell = soup.new_tag("td")
+            cell = soup.new_tag("td", bgcolor="#E8E8E8")
             pre.replace_with(frame)
             frame.append(row)
             row.append(cell)
